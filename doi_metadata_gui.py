@@ -179,4 +179,139 @@ def extract_fields(msg: dict) -> dict:
         try: year = int(str(msg.get("created", {}).get("date-time", ""))[:4])
         except Exception: year = None
     cites = msg.get("is-referenced-by-count", None)
-    return {"Title": title, "Jour
+    return {"Title": title, "Journal": journal, "Publisher": publisher, "Year": year,
+            "Citations (Crossref)": cites}
+
+
+# --------------------------------------------------------------------
+# Merge & Enrich
+# --------------------------------------------------------------------
+@dataclass
+class MatchCfg:
+    min_score: int = 80
+    wos_if_missing: bool = True
+    scopus_exact_first: bool = True
+
+def merge_enrich(df: pd.DataFrame, jcr: pd.DataFrame, scopus: pd.DataFrame, mcfg: MatchCfg) -> pd.DataFrame:
+    jcr_map = dict(zip(jcr["__norm"], jcr.index))
+    scopus_set = set(scopus["__norm"].tolist())
+    jcr_candidates = list(jcr_map.keys())
+
+    imp, qrt, scp, wos = [], [], [], []
+    for j in df["Journal"].fillna("").astype(str):
+        norm = normalize_journal(j)
+        # JCR
+        best, score = best_fuzzy_match(norm, jcr_candidates, mcfg.min_score)
+        if best and score >= mcfg.min_score:
+            row = jcr.iloc[jcr_map[best]]
+            imp.append(row["Impact Factor"]); qrt.append(row["Quartile"]); wos.append(True if mcfg.wos_if_missing else None)
+        else:
+            imp.append(None); qrt.append(None); wos.append(False if mcfg.wos_if_missing else None)
+        # Scopus
+        found = (norm in scopus_set) if mcfg.scopus_exact_first else False
+        if not found:
+            best_s, score_s = best_fuzzy_match(norm, list(scopus_set), mcfg.min_score)
+            found = bool(best_s and score_s >= mcfg.min_score)
+        scp.append(found)
+
+    df["Impact Factor (JCR)"] = imp
+    df["Quartile (JCR)"] = qrt
+    df["Indexed in Scopus"] = scp
+    df["Indexed in Web of Science"] = wos
+    return df
+
+
+# --------------------------------------------------------------------
+# Sidebar — only matching options (no path fields, no uploads)
+# --------------------------------------------------------------------
+with st.sidebar:
+    st.markdown('<div class="section-card">', unsafe_allow_html=True)
+    st.subheader("Matching Settings")
+    min_score = st.slider("Fuzzy match minimum score", 60, 95, 80)
+    st.caption("Higher Score = Higher Accuracy. Start with Default Score")
+    wos_if_jcr = st.checkbox("Mark 'Indexed in Web of Science' if present in JCR", value=True)
+    scopus_exact = st.checkbox("Scopus: try exact normalized match before fuzzy", value=True)
+    st.markdown('</div>', unsafe_allow_html=True)
+
+mcfg = MatchCfg(min_score=min_score, wos_if_missing=wos_if_jcr, scopus_exact_first=scopus_exact)
+
+
+# --------------------------------------------------------------------
+# Main panel
+# --------------------------------------------------------------------
+st.markdown('<div class="section-card">', unsafe_allow_html=True)
+st.subheader("Enter DOIs")
+dois_text = st.text_area(
+    "Paste one DOI per line",
+    height=150,
+    placeholder="10.1038/s41586-020-2649-2\n10.1126/science.aba3389"
+)
+st.markdown('</div>', unsafe_allow_html=True)
+
+st.markdown('<div class="section-card">', unsafe_allow_html=True)
+col1, col2 = st.columns([1,1])
+with col1: fetch = st.button("Fetch Metadata", type="primary")
+with col2: clear = st.button("Clear")
+st.markdown('</div>', unsafe_allow_html=True)
+
+if clear:
+    st.experimental_rerun()
+
+dois = [d.strip() for d in dois_text.splitlines() if d.strip()]
+results_df = None
+
+def load_jcr_and_scopus():
+    """
+    Return (jcr_df, scopus_df).
+    Priority: Secrets URLs (if present) -> fallback URLs above -> empty frames.
+    """
+    jcr_url = st.secrets.get("JCR_URL", JCR_FALLBACK_URL)
+    scp_url = st.secrets.get("SCOPUS_URL", SCOPUS_FALLBACK_URL)
+
+    jcr = pd.DataFrame(columns=["Journal", "Impact Factor", "Quartile", "__norm"])
+    sc  = pd.DataFrame(columns=["Scopus Title", "__norm"])
+
+    if jcr_url:
+        try:
+            jcr = read_jcr(_download_excel(jcr_url))
+        except Exception as e:
+            st.warning(f"JCR preload failed: {e}")
+
+    if scp_url:
+        try:
+            sc = read_scopus_titles(_download_excel(scp_url))
+        except Exception as e:
+            st.warning(f"Scopus preload failed: {e}")
+
+    return jcr, sc
+
+if fetch:
+    jcr_df, sc_df = load_jcr_and_scopus()
+
+    rows = []
+    for doi in dois:
+        entry = {"DOI": doi, "Title": "", "Journal": "", "Publisher": "", "Year": None, "Citations (Crossref)": None}
+        try:
+            msg = crossref_fetch(doi)
+            entry.update(extract_fields(msg))
+        except Exception as e:
+            entry["Title"] = f"[ERROR] {e}"
+        rows.append(entry); time.sleep(0.15)
+
+    base_df = pd.DataFrame(rows)
+    if not base_df.empty:
+        results_df = merge_enrich(base_df, jcr_df, sc_df, mcfg)
+
+if results_df is not None and not results_df.empty:
+    st.markdown('<div class="dataframe-wrap">', unsafe_allow_html=True)
+    st.subheader("Results")
+    st.dataframe(results_df, use_container_width=True)
+    st.markdown('</div>', unsafe_allow_html=True)
+    csv_bytes = results_df.to_csv(index=False).encode()
+    st.download_button("Download CSV", csv_bytes, "doi_metadata.csv", "text/csv")
+else:
+    st.info("Enter DOIs and click **Fetch Metadata** to see results.")
+
+# Footer
+year = datetime.now().year
+st.markdown(f'<div class="footer-credit">© {year} · Developed by Dr. Kunal Bhattacharya</div>', unsafe_allow_html=True)
