@@ -250,8 +250,10 @@ st.markdown('</div>', unsafe_allow_html=True)
 
 st.markdown('<div class="section-card">', unsafe_allow_html=True)
 col1, col2 = st.columns([1,1])
-with col1: fetch = st.button("Fetch Metadata", type="primary")
-with col2: clear = st.button("Clear")
+with col1:
+    fetch = st.button("Fetch Metadata", type="primary")
+with col2:
+    clear = st.button("Clear")
 st.markdown('</div>', unsafe_allow_html=True)
 
 if clear:
@@ -289,25 +291,48 @@ if fetch:
     jcr_df, sc_df = load_jcr_and_scopus()
 
     rows = []
-    for doi in dois:
-        entry = {"DOI": doi, "Title": "", "Journal": "", "Publisher": "", "Year": None, "Citations (Crossref)": None}
-        try:
-            msg = crossref_fetch(doi)
-            entry.update(extract_fields(msg))
-        except Exception as e:
-            entry["Title"] = f"[ERROR] {e}"
-        rows.append(entry); time.sleep(0.15)
+    total = len(dois)
 
-    base_df = pd.DataFrame(rows)
-    if not base_df.empty:
-        results_df = merge_enrich(base_df, jcr_df, sc_df, mcfg)
+    if total == 0:
+        st.info("Enter at least one DOI.")
+    else:
+        progress = st.progress(0.0, text="Starting…")
+        with st.spinner("🔎 Searching Crossref and matching JCR / Scopus…"):
+            for i, doi in enumerate(dois, start=1):
+                entry = {
+                    "DOI": doi,
+                    "Title": "",
+                    "Journal": "",
+                    "Publisher": "",
+                    "Year": None,
+                    "Citations (Crossref)": None,
+                }
+                try:
+                    msg = crossref_fetch(doi)
+                    entry.update(extract_fields(msg))
+                except Exception as e:
+                    entry["Title"] = f"[ERROR] {e}"
+
+                rows.append(entry)
+                progress.progress(i / total, text=f"Processing {i}/{total}…")
+                time.sleep(0.10)  # tiny pause keeps the UI smooth
+
+        progress.empty()
+
+        base_df = pd.DataFrame(rows)
+        if not base_df.empty:
+            results_df = merge_enrich(base_df, jcr_df, sc_df, mcfg)
 
 if results_df is not None and not results_df.empty:
+    # --- 1-based index for display ---
+    results_df.index = pd.RangeIndex(start=1, stop=len(results_df) + 1, name="S.No.")
+
     st.markdown('<div class="dataframe-wrap">', unsafe_allow_html=True)
     st.subheader("Results")
     st.dataframe(results_df, use_container_width=True)
     st.markdown('</div>', unsafe_allow_html=True)
-    csv_bytes = results_df.to_csv(index=False).encode()
+
+    csv_bytes = results_df.to_csv(index=True).encode()
     st.download_button("Download CSV", csv_bytes, "doi_metadata.csv", "text/csv")
 else:
     st.info("Enter DOIs and click **Fetch Metadata** to see results.")
