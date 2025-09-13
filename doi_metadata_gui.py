@@ -3,14 +3,14 @@
 # - Users paste DOIs (URLs ok: https://doi.org/....)
 # - JCR & Scopus auto-load (Secrets override fallbacks)
 # - Caching (JCR/Scopus 12h, Crossref 7d), parallel Crossref with retries
-# - RapidFuzz batch matching (cdist) for speed, bright ticks, 1-based index
+# - RapidFuzz batch matching (cdist), bright ticks, 1-based index
+# - NEW: "Authors" column after "Title"
 
 import io
-import time
 import typing as t
 from dataclasses import dataclass
-from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime
 
 import pandas as pd
 import requests
@@ -166,9 +166,30 @@ def _crossref_fetch_raw(doi: str, timeout: float = 15.0) -> dict:
     r.raise_for_status()
     return r.json().get("message", {})
 
+def _format_authors(msg: dict) -> str:
+    """Build 'Family, Given' for each author; fall back to 'name'/'literal' if present."""
+    authors = msg.get("author", [])
+    out = []
+    if isinstance(authors, list):
+        for a in authors:
+            if not isinstance(a, dict): 
+                continue
+            family = a.get("family", "")
+            given = a.get("given", "")
+            literal = a.get("name") or a.get("literal")
+            if family or given:
+                if family and given:
+                    out.append(f"{family}, {given}")
+                else:
+                    out.append((family or given))
+            elif literal:
+                out.append(str(literal))
+    return "; ".join(out)
+
 def _extract_fields(msg: dict) -> dict:
     title = msg.get("title", [""])
     title = title[0] if isinstance(title, list) and title else ""
+    authors = _format_authors(msg)
     ctitle = msg.get("container-title", [""])
     journal = ctitle[0] if isinstance(ctitle, list) and ctitle else ""
     publisher = msg.get("publisher", "")
@@ -183,7 +204,7 @@ def _extract_fields(msg: dict) -> dict:
         try: year = int(str(msg.get("created", {}).get("date-time", ""))[:4])
         except Exception: year = None
     cites = msg.get("is-referenced-by-count", None)
-    return {"Title": title, "Journal": journal, "Publisher": publisher,
+    return {"Title": title, "Authors": authors, "Journal": journal, "Publisher": publisher,
             "Year": year, "Citations (Crossref)": cites}
 
 @st.cache_data(show_spinner=False, ttl=60*60*24*7)  # cache each DOI for 7 days
@@ -205,8 +226,8 @@ def fetch_crossref_parallel(dois: list[str], max_workers: int = 8) -> list[dict]
                 data = fut.result()
                 if "error" in data:
                     entry = {"DOI": doi, "Title": f"[ERROR] {data['error']}",
-                             "Journal": "", "Publisher": "", "Year": None,
-                             "Citations (Crossref)": None}
+                             "Authors": "", "Journal": "", "Publisher": "",
+                             "Year": None, "Citations (Crossref)": None}
                 else:
                     entry = {"DOI": doi, **data}
                 entries.append(entry)
@@ -219,7 +240,7 @@ def fetch_crossref_parallel(dois: list[str], max_workers: int = 8) -> list[dict]
 # Batch merge with RapidFuzz cdist (very fast)
 # --------------------------------------------------------------------
 def merge_enrich_fast(df: pd.DataFrame, jcr: pd.DataFrame, scopus: pd.DataFrame, cfg: MatchCfg) -> pd.DataFrame:
-    if df.empty: 
+    if df.empty:
         return df
     q = df["Journal"].fillna("").astype(str).map(normalize_journal).tolist()
 
@@ -231,7 +252,6 @@ def merge_enrich_fast(df: pd.DataFrame, jcr: pd.DataFrame, scopus: pd.DataFrame,
     if not jcr.empty:
         j_choices = jcr["__norm"].tolist()
         if _USE_RAPIDFUZZ and q and j_choices:
-            # scores[i, j] = similarity(q[i], j_choices[j])
             scores = process.cdist(q, j_choices, scorer=fuzz.WRatio, workers=-1)
             best_idx = scores.argmax(axis=1)
             best_scr = scores.max(axis=1)
@@ -242,14 +262,13 @@ def merge_enrich_fast(df: pd.DataFrame, jcr: pd.DataFrame, scopus: pd.DataFrame,
                     qrt[i] = row["Quartile"]
                     if cfg.wos_if_missing: wos[i] = True
         else:
-            # Fallback: slower per-row
             for i, name in enumerate(q):
                 if not name: continue
                 if _USE_RAPIDFUZZ:
                     best = process.extractOne(name, j_choices, scorer=fuzz.WRatio)
                     if best and best[1] >= cfg.min_score:
-                        row = jcr.iloc[best[2] if len(best) > 2 else j_choices.index(best[0])]
-                        imp[i] = row["Impact Factor"]; qrt[i] = row["Quartile"]; 
+                        row = jcr.iloc[j_choices.index(best[0])]
+                        imp[i] = row["Impact Factor"]; qrt[i] = row["Quartile"]
                         if cfg.wos_if_missing: wos[i] = True
                 else:
                     match = difflib.get_close_matches(name, j_choices, n=1, cutoff=0.0)
@@ -257,7 +276,7 @@ def merge_enrich_fast(df: pd.DataFrame, jcr: pd.DataFrame, scopus: pd.DataFrame,
                         score = int(100 * difflib.SequenceMatcher(None, name, match[0]).ratio())
                         if score >= cfg.min_score:
                             row = jcr.iloc[j_choices.index(match[0])]
-                            imp[i] = row["Impact Factor"]; qrt[i] = row["Quartile"]; 
+                            imp[i] = row["Impact Factor"]; qrt[i] = row["Quartile"]
                             if cfg.wos_if_missing: wos[i] = True
 
     # --- Scopus (Indexed?) ---
@@ -265,11 +284,9 @@ def merge_enrich_fast(df: pd.DataFrame, jcr: pd.DataFrame, scopus: pd.DataFrame,
     if not scopus.empty:
         s_choices = scopus["__norm"].tolist()
         s_set = set(s_choices) if cfg.scopus_exact_first else set()
-        # exact first
         for i, name in enumerate(q):
             if cfg.scopus_exact_first and name in s_set:
                 scp[i] = True
-        # fuzzy for the rest
         if _USE_RAPIDFUZZ and q and s_choices:
             need = [i for i, v in enumerate(scp) if not v]
             if need:
@@ -334,8 +351,7 @@ if clear:
     st.experimental_rerun()
 
 raw_lines = [d for d in dois_text.splitlines() if d.strip()]
-# de-dupe early so we do fewer network calls
-dois = list(dict.fromkeys(normalize_doi_input(d) for d in raw_lines))
+dois = list(dict.fromkeys(normalize_doi_input(d) for d in raw_lines))  # de-dupe
 
 results_df = None
 
