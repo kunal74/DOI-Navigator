@@ -4,9 +4,10 @@
 # - JCR & Scopus auto-load (Secrets override fallbacks)
 # - Caching (JCR/Scopus 12h, Crossref 7d), parallel Crossref with retries
 # - RapidFuzz batch matching (cdist), bright ticks, 1-based index
-# - NEW: "Authors" column after "Title"
+# - Authors column (Given Family), formatted with clean initials
 
 import io
+import difflib
 import typing as t
 from dataclasses import dataclass
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -23,7 +24,6 @@ try:
     from rapidfuzz import fuzz, process  # type: ignore
     _USE_RAPIDFUZZ = True
 except Exception:
-    import difflib
     _USE_RAPIDFUZZ = False
 
 # --------------------------------------------------------------------
@@ -65,12 +65,14 @@ st.caption("Paste DOIs. The app auto-loads JCR & Scopus. Download CSV.")
 def _get_session() -> requests.Session:
     s = requests.Session()
     retries = Retry(
-        total=4, backoff_factor=0.5,
+        total=4,
+        backoff_factor=0.5,
         status_forcelist=[429, 500, 502, 503, 504],
-        allowed_methods=frozenset(["GET"])
+        allowed_methods=frozenset(["GET"]),
     )
     adapter = HTTPAdapter(max_retries=retries, pool_connections=32, pool_maxsize=32)
-    s.mount("https://", adapter); s.mount("http://", adapter)
+    s.mount("https://", adapter)
+    s.mount("http://", adapter)
     # Crossref polite pool: include a real email here
     s.headers.update({"User-Agent": "DOI-Navigator/1.0 (mailto:your.email@domain)"})
     return s
@@ -127,14 +129,16 @@ def read_jcr(io_obj) -> pd.DataFrame:
 
 _SCOPUS_TITLE_LIKELY = {
     "source title", "title", "journal", "publication title", "full title",
-    "journal title", "journal name", "scopus title", "scopus source title"
+    "journal title", "journal name", "scopus title", "scopus source title",
 }
 def _pick_scopus_title_col(df: pd.DataFrame) -> str:
     cols = {c.lower().strip(): c for c in df.columns}
     for key in _SCOPUS_TITLE_LIKELY:
-        if key in cols: return cols[key]
+        if key in cols:
+            return cols[key]
     for c in df.columns:
-        if pd.api.types.is_object_dtype(df[c]): return c
+        if pd.api.types.is_object_dtype(df[c]):
+            return c
     return df.columns[0]
 
 def read_scopus_titles(io_obj) -> pd.DataFrame:
@@ -167,24 +171,43 @@ def _crossref_fetch_raw(doi: str, timeout: float = 15.0) -> dict:
     return r.json().get("message", {})
 
 def _format_authors(msg: dict) -> str:
-    """Build 'Family, Given' for each author; fall back to 'name'/'literal' if present."""
+    """
+    Build 'Given Family' for each author (e.g., 'Pravin D. Patil').
+    - Keeps middle initials; adds a dot to single-letter initials
+    - Falls back to 'name'/'literal' if Crossref doesn't split given/family
+    - Joins authors with '; ' (no trailing semicolon)
+    """
     authors = msg.get("author", [])
-    out = []
+    parts = []
+
+    def fix_initials(s: str) -> str:
+        tokens = s.split()
+        fixed = []
+        for tok in tokens:
+            if len(tok) == 1 and tok.isalpha():  # single-letter initial
+                fixed.append(tok + ".")
+            else:
+                fixed.append(tok)
+        return " ".join(fixed)
+
     if isinstance(authors, list):
         for a in authors:
-            if not isinstance(a, dict): 
+            if not isinstance(a, dict):
                 continue
-            family = a.get("family", "")
-            given = a.get("given", "")
-            literal = a.get("name") or a.get("literal")
-            if family or given:
-                if family and given:
-                    out.append(f"{family}, {given}")
-                else:
-                    out.append((family or given))
-            elif literal:
-                out.append(str(literal))
-    return "; ".join(out)
+            given = (a.get("given") or "").strip()
+            family = (a.get("family") or "").strip()
+            literal = (a.get("name") or a.get("literal") or "").strip()
+
+            if given or family:
+                given_fixed = fix_initials(given)
+                name = (given_fixed + " " + family).strip()
+            else:
+                name = literal
+
+            if name:
+                parts.append(name)
+
+    return "; ".join(parts)
 
 def _extract_fields(msg: dict) -> dict:
     title = msg.get("title", [""])
@@ -199,13 +222,22 @@ def _extract_fields(msg: dict) -> dict:
         if isinstance(obj, dict):
             parts = obj.get("date-parts", [])
             if parts and isinstance(parts[0], list) and parts[0]:
-                year = parts[0][0]; break
+                year = parts[0][0]
+                break
     if not year:
-        try: year = int(str(msg.get("created", {}).get("date-time", ""))[:4])
-        except Exception: year = None
+        try:
+            year = int(str(msg.get("created", {}).get("date-time", ""))[:4])
+        except Exception:
+            year = None
     cites = msg.get("is-referenced-by-count", None)
-    return {"Title": title, "Authors": authors, "Journal": journal, "Publisher": publisher,
-            "Year": year, "Citations (Crossref)": cites}
+    return {
+        "Title": title,
+        "Authors": authors,
+        "Journal": journal,
+        "Publisher": publisher,
+        "Year": year,
+        "Citations (Crossref)": cites,
+    }
 
 @st.cache_data(show_spinner=False, ttl=60*60*24*7)  # cache each DOI for 7 days
 def fetch_crossref_cached(doi: str) -> dict:
@@ -225,14 +257,20 @@ def fetch_crossref_parallel(dois: list[str], max_workers: int = 8) -> list[dict]
                 doi = futs[fut]
                 data = fut.result()
                 if "error" in data:
-                    entry = {"DOI": doi, "Title": f"[ERROR] {data['error']}",
-                             "Authors": "", "Journal": "", "Publisher": "",
-                             "Year": None, "Citations (Crossref)": None}
+                    entry = {
+                        "DOI": doi,
+                        "Title": f"[ERROR] {data['error']}",
+                        "Authors": "",
+                        "Journal": "",
+                        "Publisher": "",
+                        "Year": None,
+                        "Citations (Crossref)": None,
+                    }
                 else:
                     entry = {"DOI": doi, **data}
                 entries.append(entry)
                 done += 1
-                progress.progress(done/total, text=f"Processing {done}/{total}…")
+                progress.progress(done / total, text=f"Processing {done}/{total}…")
         progress.empty()
     return entries
 
@@ -260,24 +298,21 @@ def merge_enrich_fast(df: pd.DataFrame, jcr: pd.DataFrame, scopus: pd.DataFrame,
                     row = jcr.iloc[best_idx[i]]
                     imp[i] = row["Impact Factor"]
                     qrt[i] = row["Quartile"]
-                    if cfg.wos_if_missing: wos[i] = True
+                    if cfg.wos_if_missing:
+                        wos[i] = True
         else:
             for i, name in enumerate(q):
-                if not name: continue
-                if _USE_RAPIDFUZZ:
-                    best = process.extractOne(name, j_choices, scorer=fuzz.WRatio)
-                    if best and best[1] >= cfg.min_score:
-                        row = jcr.iloc[j_choices.index(best[0])]
-                        imp[i] = row["Impact Factor"]; qrt[i] = row["Quartile"]
-                        if cfg.wos_if_missing: wos[i] = True
-                else:
-                    match = difflib.get_close_matches(name, j_choices, n=1, cutoff=0.0)
-                    if match:
-                        score = int(100 * difflib.SequenceMatcher(None, name, match[0]).ratio())
-                        if score >= cfg.min_score:
-                            row = jcr.iloc[j_choices.index(match[0])]
-                            imp[i] = row["Impact Factor"]; qrt[i] = row["Quartile"]
-                            if cfg.wos_if_missing: wos[i] = True
+                if not name:
+                    continue
+                match = difflib.get_close_matches(name, j_choices, n=1, cutoff=0.0)
+                if match:
+                    score = int(100 * difflib.SequenceMatcher(None, name, match[0]).ratio())
+                    if score >= cfg.min_score:
+                        row = jcr.iloc[j_choices.index(match[0])]
+                        imp[i] = row["Impact Factor"]
+                        qrt[i] = row["Quartile"]
+                        if cfg.wos_if_missing:
+                            wos[i] = True
 
     # --- Scopus (Indexed?) ---
     scp = [False] * len(q)
@@ -298,7 +333,8 @@ def merge_enrich_fast(df: pd.DataFrame, jcr: pd.DataFrame, scopus: pd.DataFrame,
                         scp[need[k]] = True
         else:
             for i, name in enumerate(q):
-                if scp[i]: continue
+                if scp[i]:
+                    continue
                 match = difflib.get_close_matches(name, s_choices, n=1, cutoff=0.0)
                 if match:
                     score = int(100 * difflib.SequenceMatcher(None, name, match[0]).ratio())
@@ -337,31 +373,39 @@ st.subheader("Enter DOIs")
 dois_text = st.text_area(
     "Paste one DOI per line",
     height=150,
-    placeholder="https://doi.org/10.1016/j.arr.2025.102847\nhttps://doi.org/10.1016/j.arr.2025.102834"
+    placeholder="https://doi.org/10.1016/j.arr.2025.102847\nhttps://doi.org/10.1016/j.arr.2025.102834",
 )
 st.markdown('</div>', unsafe_allow_html=True)
 
 st.markdown('<div class="section-card">', unsafe_allow_html=True)
-col1, col2 = st.columns([1,1])
-with col1: fetch = st.button("Fetch Metadata", type="primary")
-with col2: clear = st.button("Clear")
+col1, col2 = st.columns([1, 1])
+with col1:
+    fetch = st.button("Fetch Metadata", type="primary")
+with col2:
+    clear = st.button("Clear")
 st.markdown('</div>', unsafe_allow_html=True)
 
 if clear:
     st.experimental_rerun()
 
 raw_lines = [d for d in dois_text.splitlines() if d.strip()]
-dois = list(dict.fromkeys(normalize_doi_input(d) for d in raw_lines))  # de-dupe
+# de-dupe early so we do fewer network calls
+dois = list(dict.fromkeys(normalize_doi_input(d) for d in raw_lines))
 
 results_df = None
 
 def load_jcr_and_scopus():
     jcr_url = st.secrets.get("JCR_URL", JCR_FALLBACK_URL)
     scp_url = st.secrets.get("SCOPUS_URL", SCOPUS_FALLBACK_URL)
-    status = st.empty(); status.info("Loading JCR / Scopus lists…")
+    status = st.empty()
+    status.info("Loading JCR / Scopus lists…")
     try:
-        jcr = load_jcr_cached(jcr_url) if jcr_url else pd.DataFrame(columns=["Journal","Impact Factor","Quartile","__norm"])
-        scp = load_scopus_cached(scp_url) if scp_url else pd.DataFrame(columns=["Scopus Title","__norm"])
+        jcr = load_jcr_cached(jcr_url) if jcr_url else pd.DataFrame(
+            columns=["Journal", "Impact Factor", "Quartile", "__norm"]
+        )
+        scp = load_scopus_cached(scp_url) if scp_url else pd.DataFrame(
+            columns=["Scopus Title", "__norm"]
+        )
     finally:
         status.empty()
     return jcr, scp
@@ -384,8 +428,10 @@ if results_df is not None and not results_df.empty:
     # Bright tick icons
     disp = results_df.copy()
     def yn_to_emoji(v):
-        if v is True: return "✅"
-        if v is False: return "❌"
+        if v is True:
+            return "✅"
+        if v is False:
+            return "❌"
         return ""
     disp["Indexed in Scopus"] = disp["Indexed in Scopus"].map(yn_to_emoji)
     disp["Indexed in Web of Science"] = disp["Indexed in Web of Science"].map(yn_to_emoji)
@@ -402,4 +448,7 @@ else:
 
 # Footer
 year = datetime.now().year
-st.markdown(f'<div class="footer-credit">© {year} · Developed by Dr. Kunal Bhattacharya</div>', unsafe_allow_html=True)
+st.markdown(
+    f'<div class="footer-credit">© {year} · Developed by Dr. Kunal Bhattacharya</div>',
+    unsafe_allow_html=True,
+)
