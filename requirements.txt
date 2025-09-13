@@ -4,3 +4,4 @@ requests
 xlsxwriter
 reportlab
 rapidfuzz
+openpyxl>=3.1
