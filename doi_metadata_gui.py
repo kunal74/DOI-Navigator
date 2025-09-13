@@ -1,7 +1,9 @@
 # doi_metadata_gui.py
-# DOI Navigator — dark neutral theme
-# Crossref-only citations, JCR (B/M/Q), Scopus flag, CSV-only
+# DOI Navigator — cloud-friendly (no local paths)
+# Users only paste DOIs. App auto-loads JCR & Scopus Excel from URLs in Streamlit Secrets.
+# Crossref citations only; CSV download; dark neutral UI.
 
+import io
 import time
 import typing as t
 from dataclasses import dataclass
@@ -12,7 +14,7 @@ import requests
 import streamlit as st
 
 try:
-    from rapidfuzz import fuzz, process  # type: ignore
+    from rapidfuzz import fuzz, process  # optional but faster
     _USE_RAPIDFUZZ = True
 except Exception:
     import difflib
@@ -26,96 +28,39 @@ st.set_page_config(page_title="DOI Navigator", layout="wide", page_icon="🧭")
 
 st.markdown("""
 <style>
-/* --- App background & base text --- */
-.stApp {
-  background: #0b1220; /* deep slate */
-  color: #e5e7eb;
-}
-
-/* Headline */
-.big-title {
-  color: #e5e7eb;
-  font-size: 36px;
-  font-weight: 850;
-  letter-spacing: .2px;
-  margin: 0 0 6px 0;
-}
-
-/* Cards (sidebar + main) */
-.section-card {
-  background: #111827;  /* zinc-900 */
-  border: 1px solid #1f2937; /* slate-800 */
-  border-radius: 14px;
-  padding: 16px 18px;
-  box-shadow: 0 10px 24px rgba(0,0,0,.35);
-}
-
-/* Inputs */
-div[data-baseweb="input"] input {
-  background: #0f172a !important;
-  color: #e5e7eb !important;
-  border: 1px solid #334155 !important;
-  border-radius: 10px !important;
-}
-textarea {
-  background: #0f172a !important;
-  color: #e5e7eb !important;
-  border: 1px solid #334155 !important;
-  border-radius: 10px !important;
-}
-.stFileUploader {
-  background: #0f172a !important;
-  border: 1px dashed #334155 !important;
-  border-radius: 10px !important;
-}
-
-/* Slider */
-.stSlider>div>div>div>div {
-  background: #3b82f6 !important; /* accent track */
-}
-.stSlider>div>div>div[role="slider"] {
-  background: #93c5fd !important; /* handle */
-}
-
-/* Buttons */
-.stButton>button, .stDownloadButton>button {
-  background: #3b82f6;
-  color: #fff;
-  border-radius: 10px;
-  padding: .55rem 1rem;
-  border: 0;
-  box-shadow: 0 8px 18px rgba(59,130,246,.35);
-}
-.stButton>button:hover, .stDownloadButton>button:hover {
-  filter: brightness(1.06);
-}
-
-/* Dataframe container */
-.dataframe-wrap {
-  background: #0f172a;
-  border: 1px solid #1f2937;
-  border-radius: 14px;
-  box-shadow: 0 10px 22px rgba(0,0,0,.35);
-  padding: 8px;
-}
-
-/* Sidebar headers */
-section[data-testid="stSidebar"] h2, section[data-testid="stSidebar"] h3, section[data-testid="stSidebar"] label {
-  color: #e5e7eb;
-}
-
-/* Footer */
-.footer-credit {
-  margin-top: 20px;
-  text-align: center;
-  color: #94a3b8;
-  font-size: 13px;
-}
+.stApp { background: #0b1220; color: #e5e7eb; }
+.big-title { color: #e5e7eb; font-size: 36px; font-weight: 850; letter-spacing: .2px; margin: 0 0 6px 0; }
+.section-card { background: #111827; border: 1px solid #1f2937; border-radius: 14px; padding: 16px 18px; box-shadow: 0 10px 24px rgba(0,0,0,.35); }
+div[data-baseweb="input"] input, textarea { background: #0f172a !important; color: #e5e7eb !important; border: 1px solid #334155 !important; border-radius: 10px !important; }
+.stSlider>div>div>div>div { background: #3b82f6 !important; } .stSlider>div>div>div[role="slider"] { background: #93c5fd !important; }
+.stButton>button, .stDownloadButton>button { background: #3b82f6; color: #fff; border-radius: 10px; padding: .55rem 1rem; border: 0; box-shadow: 0 8px 18px rgba(59,130,246,.35); }
+.stButton>button:hover, .stDownloadButton>button:hover { filter: brightness(1.06); }
+.dataframe-wrap { background: #0f172a; border: 1px solid #1f2937; border-radius: 14px; box-shadow: 0 10px 22px rgba(0,0,0,.35); padding: 8px; }
+.footer-credit { margin-top: 20px; text-align: center; color: #94a3b8; font-size: 13px; }
 </style>
 """, unsafe_allow_html=True)
 
 st.markdown('<div class="big-title">DOI Navigator</div>', unsafe_allow_html=True)
-st.caption("Paste DOIs, fetch metadata & Crossref citations, and enrich with JCR/Scopus. Download CSV.")
+st.caption("Paste DOIs. The app auto-loads JCR & Scopus lists configured by the owner. Download CSV.")
+
+
+# -----------------------------
+# Helpers
+# -----------------------------
+def _download_excel(url: str) -> io.BytesIO:
+    r = requests.get(url, timeout=45)
+    r.raise_for_status()
+    return io.BytesIO(r.content)
+
+def _load_bytes_from_secret(key: str) -> t.Optional[io.BytesIO]:
+    url = st.secrets.get(key, "")
+    if not url:
+        return None
+    try:
+        return _download_excel(url)
+    except Exception as e:
+        st.warning(f"Could not download {key} from secrets: {e}")
+        return None
 
 
 # -----------------------------
@@ -151,12 +96,13 @@ def best_fuzzy_match(name: str, candidates: t.List[str], min_score: int = 80) ->
             return match[0], score
         return ("", 0)
 
+
 # -----------------------------
-# Readers
+# Readers (accept path or file-like)
 # -----------------------------
-def read_jcr(path: str) -> pd.DataFrame:
+def read_jcr(io_obj) -> pd.DataFrame:
     """Read first sheet; map columns: B=Journal, M=Impact Factor, Q=Quartile."""
-    xls = pd.ExcelFile(path, engine="openpyxl")
+    xls = pd.ExcelFile(io_obj, engine="openpyxl")
     df = pd.read_excel(xls, xls.sheet_names[0])
     if df.shape[1] < 17:
         raise ValueError("JCR file has fewer than 17 columns; cannot map B/M/Q reliably.")
@@ -180,8 +126,8 @@ def _pick_scopus_title_col(df: pd.DataFrame) -> str:
         if pd.api.types.is_object_dtype(df[c]): return c
     return df.columns[0]
 
-def read_scopus_titles(path: str) -> pd.DataFrame:
-    xls = pd.ExcelFile(path, engine="openpyxl")
+def read_scopus_titles(io_obj) -> pd.DataFrame:
+    xls = pd.ExcelFile(io_obj, engine="openpyxl")
     df = pd.read_excel(xls, xls.sheet_names[0])
     title_col = _pick_scopus_title_col(df)
     out = df[[title_col]].copy()
@@ -189,12 +135,13 @@ def read_scopus_titles(path: str) -> pd.DataFrame:
     out["__norm"] = out["Scopus Title"].map(normalize_journal)
     return out
 
+
 # -----------------------------
 # Crossref
 # -----------------------------
 def crossref_fetch(doi: str, timeout: float = 15.0) -> dict:
     url = f"https://api.crossref.org/works/{doi}"
-    headers = {"User-Agent": "doi-navigator/1.0 (mailto:example@example.com)"}  # set your email if deploying
+    headers = {"User-Agent": "DOI-Navigator/1.0 (mailto:your.email@domain)"}  # TODO: set your email
     r = requests.get(url, headers=headers, timeout=timeout)
     r.raise_for_status()
     return r.json().get("message", {})
@@ -220,6 +167,7 @@ def extract_fields(msg: dict) -> dict:
     cites = msg.get("is-referenced-by-count", None)
     return {"Title": title, "Journal": journal, "Publisher": publisher, "Year": year,
             "Citations (Crossref)": cites}
+
 
 # -----------------------------
 # Merge & Enrich
@@ -258,18 +206,11 @@ def merge_enrich(df: pd.DataFrame, jcr: pd.DataFrame, scopus: pd.DataFrame, mcfg
     df["Indexed in Web of Science"] = wos
     return df
 
+
 # -----------------------------
-# Sidebar & Inputs
+# Sidebar — only matching options (no path fields, no uploads)
 # -----------------------------
 with st.sidebar:
-    st.markdown('<div class="section-card">', unsafe_allow_html=True)
-    st.subheader("Data Sources")
-    default_jcr = st.text_input("Path to JCR Excel", value="AllJournalsJCR2025.xlsx")
-    default_scopus = st.text_input("Path to Scopus Title List Excel", value="ext_list_Aug_2025.xlsx")
-    up_jcr = st.file_uploader("Upload JCR Excel", type=["xlsx"])
-    up_scopus = st.file_uploader("Upload Scopus Title List Excel", type=["xlsx"])
-    st.markdown('</div>', unsafe_allow_html=True)
-
     st.markdown('<div class="section-card">', unsafe_allow_html=True)
     st.subheader("Matching Settings")
     min_score = st.slider("Fuzzy match minimum score", 60, 95, 80)
@@ -279,6 +220,7 @@ with st.sidebar:
     st.markdown('</div>', unsafe_allow_html=True)
 
 mcfg = MatchCfg(min_score=min_score, wos_if_missing=wos_if_jcr, scopus_exact_first=scopus_exact)
+
 
 # -----------------------------
 # Main panel
@@ -294,22 +236,30 @@ with col1: fetch = st.button("Fetch Metadata", type="primary")
 with col2: clear = st.button("Clear")
 st.markdown('</div>', unsafe_allow_html=True)
 
-if clear: st.experimental_rerun()
+if clear:
+    st.experimental_rerun()
 
 dois = [d.strip() for d in dois_text.splitlines() if d.strip()]
 results_df = None
 
+def load_jcr_and_scopus():
+    """Return (jcr_df, scopus_df), using st.secrets URLs. Falls back to empty frames."""
+    jcr_bytes = _load_bytes_from_secret("JCR_URL")
+    scp_bytes = _load_bytes_from_secret("SCOPUS_URL")
+    if jcr_bytes is None:
+        st.error("JCR_URL is not set in Secrets. The app owner should add it in App → Settings → Secrets.")
+        jcr = pd.DataFrame(columns=["Journal", "Impact Factor", "Quartile", "__norm"])
+    else:
+        jcr = read_jcr(jcr_bytes)
+    if scp_bytes is None:
+        st.warning("SCOPUS_URL is not set in Secrets. Scopus indexing column will show False.")
+        sc = pd.DataFrame(columns=["Scopus Title", "__norm"])
+    else:
+        sc = read_scopus_titles(scp_bytes)
+    return jcr, sc
+
 if fetch:
-    try:
-        jcr_df = read_jcr(up_jcr if up_jcr else default_jcr)
-    except Exception as e:
-        st.error(f"Could not read JCR Excel: {e}")
-        jcr_df = pd.DataFrame(columns=["Journal", "Impact Factor", "Quartile", "__norm"])
-    try:
-        sc_df = read_scopus_titles(up_scopus if up_scopus else default_scopus)
-    except Exception as e:
-        st.error(f"Could not read Scopus Excel: {e}")
-        sc_df = pd.DataFrame(columns=["Scopus Title", "__norm"])
+    jcr_df, sc_df = load_jcr_and_scopus()
 
     rows = []
     for doi in dois:
@@ -320,6 +270,7 @@ if fetch:
         except Exception as e:
             entry["Title"] = f"[ERROR] {e}"
         rows.append(entry); time.sleep(0.15)
+
     base_df = pd.DataFrame(rows)
     if not base_df.empty:
         results_df = merge_enrich(base_df, jcr_df, sc_df, mcfg)
