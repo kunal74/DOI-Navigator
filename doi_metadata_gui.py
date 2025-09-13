@@ -1,14 +1,16 @@
 # doi_metadata_gui.py
-# DOI Navigator — cloud-friendly (no local paths)
-# Users only paste DOIs. App auto-loads JCR & Scopus Excel from the URLs below
-# (or from Streamlit Secrets if you set JCR_URL / SCOPUS_URL).
-# Crossref citations only; CSV download; dark neutral UI.
+# DOI Navigator — fast & cloud-friendly
+# - Users paste DOIs only (URLs ok: https://doi.org/....)
+# - JCR & Scopus auto-load from URLs (Secrets override hard-coded fallbacks)
+# - Caching for JCR/Scopus; parallel Crossref fetch with live progress
+# - Dark UI, CSV download, 1-based index, bright tick icons
 
 import io
 import time
 import typing as t
 from dataclasses import dataclass
 from datetime import datetime
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import pandas as pd
 import requests
@@ -23,8 +25,7 @@ except Exception:
 
 
 # --------------------------------------------------------------------
-# Built-in data sources (your Dropbox links)
-# If Streamlit Secrets are set, they override these.
+# Built-in data sources (your Dropbox links). Secrets override these.
 # --------------------------------------------------------------------
 JCR_FALLBACK_URL = (
     "https://www.dropbox.com/scl/fi/z1xdk4pbpko4p2x0brgq7/AllJournalsJCR2025.xlsx"
@@ -39,7 +40,6 @@ SCOPUS_FALLBACK_URL = (
 # Page & Styles
 # --------------------------------------------------------------------
 st.set_page_config(page_title="DOI Navigator", layout="wide", page_icon="🧭")
-
 st.markdown("""
 <style>
 .stApp { background: #0b1220; color: #e5e7eb; }
@@ -55,14 +55,19 @@ div[data-baseweb="input"] input, textarea { background: #0f172a !important; colo
 """, unsafe_allow_html=True)
 
 st.markdown('<div class="big-title">DOI Navigator</div>', unsafe_allow_html=True)
-st.caption("Paste DOIs. The app auto-loads JCR & Scopus lists provided by the owner. Download CSV.")
-
+st.caption("Paste DOIs. The app auto-loads JCR & Scopus. Download CSV.")
 
 # --------------------------------------------------------------------
-# Helpers
+# Networking helpers (session + downloads)
 # --------------------------------------------------------------------
+@st.cache_resource(show_spinner=False)
+def _get_session() -> requests.Session:
+    s = requests.Session()
+    s.headers.update({"User-Agent": "DOI-Navigator/1.0 (mailto:your.email@domain)"})  # set your email
+    return s
+
 def _download_excel(url: str) -> io.BytesIO:
-    r = requests.get(url, timeout=45)
+    r = _get_session().get(url, timeout=60)
     r.raise_for_status()
     return io.BytesIO(r.content)
 
@@ -76,6 +81,17 @@ def _load_bytes_from_secret(key: str) -> t.Optional[io.BytesIO]:
         st.warning(f"Could not download {key} from secrets: {e}")
         return None
 
+# --------------------------------------------------------------------
+# DOI input normalization (accept full https://doi.org/... too)
+# --------------------------------------------------------------------
+def normalize_doi_input(s: str) -> str:
+    s = s.strip()
+    low = s.lower()
+    for prefix in ("https://doi.org/", "http://doi.org/", "doi:", "doi "):
+        if low.startswith(prefix):
+            s = s[len(prefix):]
+            break
+    return s.strip()
 
 # --------------------------------------------------------------------
 # Matching config & helpers
@@ -109,7 +125,6 @@ def best_fuzzy_match(name: str, candidates: t.List[str], min_score: int = 80) ->
             score = int(100 * difflib.SequenceMatcher(None, name, match[0]).ratio())
             return match[0], score
         return ("", 0)
-
 
 # --------------------------------------------------------------------
 # Readers (accept file-like objects)
@@ -149,14 +164,23 @@ def read_scopus_titles(io_obj) -> pd.DataFrame:
     out["__norm"] = out["Scopus Title"].map(normalize_journal)
     return out
 
+# --------------------------------------------------------------------
+# Cache the heavy Excel loads
+# --------------------------------------------------------------------
+@st.cache_data(show_spinner=True, ttl=60*60*12)  # 12 hours
+def load_jcr_cached(url: str) -> pd.DataFrame:
+    return read_jcr(_download_excel(url))
+
+@st.cache_data(show_spinner=True, ttl=60*60*12)  # 12 hours
+def load_scopus_cached(url: str) -> pd.DataFrame:
+    return read_scopus_titles(_download_excel(url))
 
 # --------------------------------------------------------------------
-# Crossref
+# Crossref fetch (parallel)
 # --------------------------------------------------------------------
-def crossref_fetch(doi: str, timeout: float = 15.0) -> dict:
+def _crossref_fetch_one(session: requests.Session, doi: str, timeout: float = 15.0) -> dict:
     url = f"https://api.crossref.org/works/{doi}"
-    headers = {"User-Agent": "DOI-Navigator/1.0 (mailto:your.email@domain)"}  # ← put your real email
-    r = requests.get(url, headers=headers, timeout=timeout)
+    r = session.get(url, timeout=timeout)
     r.raise_for_status()
     return r.json().get("message", {})
 
@@ -182,6 +206,28 @@ def extract_fields(msg: dict) -> dict:
     return {"Title": title, "Journal": journal, "Publisher": publisher, "Year": year,
             "Citations (Crossref)": cites}
 
+def fetch_crossref_parallel(dois: list[str], max_workers: int = 6) -> list[dict]:
+    session = _get_session()
+    entries: list[dict] = []
+    with ThreadPoolExecutor(max_workers=max_workers) as ex:
+        futs = {ex.submit(_crossref_fetch_one, session, d): d for d in dois}
+        total = len(futs)
+        progress = st.progress(0.0, text="Starting…")
+        done = 0
+        with st.spinner("🔎 Searching Crossref and matching JCR / Scopus…"):
+            for fut in as_completed(futs):
+                doi = futs[fut]
+                entry = {"DOI": doi, "Title": "", "Journal": "", "Publisher": "", "Year": None, "Citations (Crossref)": None}
+                try:
+                    msg = fut.result()
+                    entry.update(extract_fields(msg))
+                except Exception as e:
+                    entry["Title"] = f"[ERROR] {e}"
+                entries.append(entry)
+                done += 1
+                progress.progress(done/total, text=f"Processing {done}/{total}…")
+        progress.empty()
+    return entries
 
 # --------------------------------------------------------------------
 # Merge & Enrich
@@ -220,9 +266,8 @@ def merge_enrich(df: pd.DataFrame, jcr: pd.DataFrame, scopus: pd.DataFrame, mcfg
     df["Indexed in Web of Science"] = wos
     return df
 
-
 # --------------------------------------------------------------------
-# Sidebar — only matching options (no path fields, no uploads)
+# Sidebar — matching options + fast mode
 # --------------------------------------------------------------------
 with st.sidebar:
     st.markdown('<div class="section-card">', unsafe_allow_html=True)
@@ -231,10 +276,13 @@ with st.sidebar:
     st.caption("Higher Score = Higher Accuracy. Start with Default Score")
     wos_if_jcr = st.checkbox("Mark 'Indexed in Web of Science' if present in JCR", value=True)
     scopus_exact = st.checkbox("Scopus: try exact normalized match before fuzzy", value=True)
+    st.markdown("---")
+    fast_mode = st.checkbox("⚡ Fast fetch (parallel)", value=True)
+    workers = st.slider("Max parallel requests", 2, 12, 6)
+    st.caption("Use a sensible number to stay polite with Crossref.")
     st.markdown('</div>', unsafe_allow_html=True)
 
 mcfg = MatchCfg(min_score=min_score, wos_if_missing=wos_if_jcr, scopus_exact_first=scopus_exact)
-
 
 # --------------------------------------------------------------------
 # Main panel
@@ -244,95 +292,92 @@ st.subheader("Enter DOIs")
 dois_text = st.text_area(
     "Paste one DOI per line",
     height=150,
-    placeholder="10.1038/s41586-020-2649-2\n10.1126/science.aba3389"
+    placeholder="https://doi.org/10.1016/j.arr.2025.102847\nhttps://doi.org/10.1016/j.arr.2025.102834"
 )
 st.markdown('</div>', unsafe_allow_html=True)
 
 st.markdown('<div class="section-card">', unsafe_allow_html=True)
 col1, col2 = st.columns([1,1])
-with col1:
-    fetch = st.button("Fetch Metadata", type="primary")
-with col2:
-    clear = st.button("Clear")
+with col1: fetch = st.button("Fetch Metadata", type="primary")
+with col2: clear = st.button("Clear")
 st.markdown('</div>', unsafe_allow_html=True)
 
 if clear:
     st.experimental_rerun()
 
-dois = [d.strip() for d in dois_text.splitlines() if d.strip()]
+# Accept both bare DOIs and full https links
+raw_lines = [d for d in dois_text.splitlines() if d.strip()]
+dois = [normalize_doi_input(d) for d in raw_lines]
+
 results_df = None
 
 def load_jcr_and_scopus():
-    """
-    Return (jcr_df, scopus_df).
-    Priority: Secrets URLs (if present) -> fallback URLs above -> empty frames.
-    """
+    """Return (jcr_df, scopus_df) using Secrets or fallbacks; both cached."""
     jcr_url = st.secrets.get("JCR_URL", JCR_FALLBACK_URL)
     scp_url = st.secrets.get("SCOPUS_URL", SCOPUS_FALLBACK_URL)
 
+    status = st.empty()
+    status.info("Loading JCR / Scopus lists…")
+
     jcr = pd.DataFrame(columns=["Journal", "Impact Factor", "Quartile", "__norm"])
     sc  = pd.DataFrame(columns=["Scopus Title", "__norm"])
-
-    if jcr_url:
-        try:
-            jcr = read_jcr(_download_excel(jcr_url))
-        except Exception as e:
-            st.warning(f"JCR preload failed: {e}")
-
-    if scp_url:
-        try:
-            sc = read_scopus_titles(_download_excel(scp_url))
-        except Exception as e:
-            st.warning(f"Scopus preload failed: {e}")
-
+    try:
+        if jcr_url:
+            jcr = load_jcr_cached(jcr_url)
+        if scp_url:
+            sc = load_scopus_cached(scp_url)
+    finally:
+        status.empty()
     return jcr, sc
 
 if fetch:
     jcr_df, sc_df = load_jcr_and_scopus()
 
-    rows = []
-    total = len(dois)
-
-    if total == 0:
+    if len(dois) == 0:
         st.info("Enter at least one DOI.")
     else:
-        progress = st.progress(0.0, text="Starting…")
-        with st.spinner("🔎 Searching Crossref and matching JCR / Scopus…"):
-            for i, doi in enumerate(dois, start=1):
-                entry = {
-                    "DOI": doi,
-                    "Title": "",
-                    "Journal": "",
-                    "Publisher": "",
-                    "Year": None,
-                    "Citations (Crossref)": None,
-                }
-                try:
-                    msg = crossref_fetch(doi)
-                    entry.update(extract_fields(msg))
-                except Exception as e:
-                    entry["Title"] = f"[ERROR] {e}"
-
-                rows.append(entry)
-                progress.progress(i / total, text=f"Processing {i}/{total}…")
-                time.sleep(0.10)  # tiny pause keeps the UI smooth
-
-        progress.empty()
+        if fast_mode:
+            rows = fetch_crossref_parallel(dois, max_workers=workers)
+        else:
+            rows = []
+            total = len(dois)
+            progress = st.progress(0.0, text="Starting…")
+            with st.spinner("🔎 Searching Crossref and matching JCR / Scopus…"):
+                for i, doi in enumerate(dois, start=1):
+                    entry = {"DOI": doi, "Title": "", "Journal": "", "Publisher": "", "Year": None, "Citations (Crossref)": None}
+                    try:
+                        msg = _crossref_fetch_one(_get_session(), doi)
+                        entry.update(extract_fields(msg))
+                    except Exception as e:
+                        entry["Title"] = f"[ERROR] {e}"
+                    rows.append(entry)
+                    progress.progress(i/total, text=f"Processing {i}/{total}…")
+            progress.empty()
 
         base_df = pd.DataFrame(rows)
         if not base_df.empty:
             results_df = merge_enrich(base_df, jcr_df, sc_df, mcfg)
 
 if results_df is not None and not results_df.empty:
-    # --- 1-based index for display ---
+    # 1-based index for display
     results_df.index = pd.RangeIndex(start=1, stop=len(results_df) + 1, name="S.No.")
+
+    # Bright tick icons for Scopus/WoS
+    disp = results_df.copy()
+    def yn_to_emoji(v):
+        if v is True: return "✅"
+        if v is False: return "❌"
+        return ""
+    disp["Indexed in Scopus"] = disp["Indexed in Scopus"].map(yn_to_emoji)
+    disp["Indexed in Web of Science"] = disp["Indexed in Web of Science"].map(yn_to_emoji)
 
     st.markdown('<div class="dataframe-wrap">', unsafe_allow_html=True)
     st.subheader("Results")
-    st.dataframe(results_df, use_container_width=True)
+    st.dataframe(disp, use_container_width=True)
     st.markdown('</div>', unsafe_allow_html=True)
 
-    csv_bytes = results_df.to_csv(index=True).encode()
+    # CSV download (includes the emoji ticks so they stay bright in exports too)
+    csv_bytes = disp.to_csv(index=True).encode()
     st.download_button("Download CSV", csv_bytes, "doi_metadata.csv", "text/csv")
 else:
     st.info("Enter DOIs and click **Fetch Metadata** to see results.")
