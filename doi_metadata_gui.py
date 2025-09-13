@@ -1,10 +1,16 @@
 # doi_metadata_gui.py
 # DOI Navigator — ultra fast & cloud-friendly
-# - Users paste DOIs (URLs ok: https://doi.org/....)
-# - JCR & Scopus auto-load (Secrets override fallbacks)
-# - Caching (JCR/Scopus 12h, Crossref 7d), parallel Crossref with retries
-# - RapidFuzz batch matching (cdist), bright ticks, 1-based index
-# - Authors column (Given Family), formatted with clean initials
+#
+# - Paste DOIs (URLs like https://doi.org/... also work)
+# - JCR & Scopus auto-load from owner-provided URLs (Streamlit Secrets override fallbacks)
+# - Speed: JCR/Scopus cached 12h; Crossref parallel with retries + 7d cache
+# - Matching: RapidFuzz batch cdist (vectorized) with fallback to difflib
+# - UI: dark, bright ticks on-screen; CSV export uses "Yes/No" + UTF-8 BOM for Excel
+# - Authors column formatted as "Given Family" (e.g., "Pravin D. Patil")
+#
+# References:
+# Crossref API usage & polite pool: https://api.crossref.org/swagger-ui/index.html#/
+# Streamlit caching: https://docs.streamlit.io/develop/api-reference/caching/st.cache_data
 
 import io
 import difflib
@@ -70,7 +76,7 @@ def _get_session() -> requests.Session:
         status_forcelist=[429, 500, 502, 503, 504],
         allowed_methods=frozenset(["GET"]),
     )
-    adapter = HTTPAdapter(max_retries=retries, pool_connections=32, pool_maxsize=32)
+    adapter = HTTPAdapter(max_retries=retries, pool_connections=64, pool_maxsize=64)
     s.mount("https://", adapter)
     s.mount("http://", adapter)
     # Crossref polite pool: include a real email here
@@ -246,7 +252,9 @@ def fetch_crossref_cached(doi: str) -> dict:
     except Exception as e:
         return {"error": str(e)}
 
-def fetch_crossref_parallel(dois: list[str], max_workers: int = 8) -> list[dict]:
+def fetch_crossref_parallel(dois: list[str], max_workers: int = 12) -> list[dict]:
+    """Parallel Crossref fetch with progress; preserves input order."""
+    order = {d: i for i, d in enumerate(dois)}
     entries: list[dict] = []
     with ThreadPoolExecutor(max_workers=min(max_workers, max(1, len(dois)))) as ex:
         futs = {ex.submit(fetch_crossref_cached, d): d for d in dois}
@@ -272,6 +280,8 @@ def fetch_crossref_parallel(dois: list[str], max_workers: int = 8) -> list[dict]
                 done += 1
                 progress.progress(done / total, text=f"Processing {done}/{total}…")
         progress.empty()
+    # sort back to input order
+    entries.sort(key=lambda e: order.get(e["DOI"], 10**9))
     return entries
 
 # --------------------------------------------------------------------
@@ -359,7 +369,7 @@ with st.sidebar:
     wos_if_jcr = st.checkbox("Mark 'Indexed in Web of Science' if present in JCR", value=True)
     scopus_exact = st.checkbox("Scopus: try exact normalized match before fuzzy", value=True)
     st.markdown("---")
-    fast_workers = st.slider("Max parallel requests (Crossref)", 2, 16, 8)
+    fast_workers = st.slider("Max parallel requests (Crossref)", 2, 16, 12)
     st.caption("Use a sensible number to stay polite with Crossref.")
     st.markdown('</div>', unsafe_allow_html=True)
 
@@ -389,7 +399,7 @@ if clear:
     st.experimental_rerun()
 
 raw_lines = [d for d in dois_text.splitlines() if d.strip()]
-# de-dupe early so we do fewer network calls
+# de-dupe early so we do fewer network calls (preserves input order)
 dois = list(dict.fromkeys(normalize_doi_input(d) for d in raw_lines))
 
 results_df = None
@@ -421,18 +431,21 @@ if fetch:
         if not base_df.empty:
             results_df = merge_enrich_fast(base_df, jcr_df, sc_df, cfg)
 
+# ---------- DISPLAY & DOWNLOAD ----------
 if results_df is not None and not results_df.empty:
     # 1-based index for display
     results_df.index = pd.RangeIndex(start=1, stop=len(results_df) + 1, name="S.No.")
 
-    # Bright tick icons
+    # DISPLAY with bright tick emojis
     disp = results_df.copy()
+
     def yn_to_emoji(v):
         if v is True:
             return "✅"
         if v is False:
             return "❌"
         return ""
+
     disp["Indexed in Scopus"] = disp["Indexed in Scopus"].map(yn_to_emoji)
     disp["Indexed in Web of Science"] = disp["Indexed in Web of Science"].map(yn_to_emoji)
 
@@ -441,7 +454,16 @@ if results_df is not None and not results_df.empty:
     st.dataframe(disp, use_container_width=True)
     st.markdown('</div>', unsafe_allow_html=True)
 
-    csv_bytes = disp.to_csv(index=True).encode()
+    # DOWNLOAD: Excel-friendly text + UTF-8 BOM (prevents garbled characters)
+    export_df = results_df.copy()
+    export_df["Indexed in Scopus"] = export_df["Indexed in Scopus"].map(
+        lambda v: "Yes" if v is True else "No" if v is False else ""
+    )
+    export_df["Indexed in Web of Science"] = export_df["Indexed in Web of Science"].map(
+        lambda v: "Yes" if v is True else "No" if v is False else ""
+    )
+
+    csv_bytes = export_df.to_csv(index=True).encode("utf-8-sig")
     st.download_button("Download CSV", csv_bytes, "doi_metadata.csv", "text/csv")
 else:
     st.info("Enter DOIs and click **Fetch Metadata** to see results.")
