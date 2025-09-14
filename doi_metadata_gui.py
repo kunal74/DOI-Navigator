@@ -1,5 +1,5 @@
 # doi_metadata_gui.py
-# DOI Navigator — fast, RA-agnostic (Crossref + DOI content negotiation fallback)
+# DOI Navigator – fast, RA-agnostic (Crossref + DOI content negotiation fallback)
 #
 # - Paste DOIs (full https://doi.org/... also fine)
 # - JCR & Scopus auto-load (your Dropbox links; Streamlit Secrets can override)
@@ -11,7 +11,7 @@
 #
 # References:
 # - DOI content negotiation works across RAs via doi.org: https://www.crossref.org/documentation/retrieve-metadata/content-negotiation/  # noqa
-# - DataCite note on CN for any DOI: https://support.datacite.org/docs/what-is-the-best-way-to-make-a-content-negotiation-request-for-any-doi  # noqa
+# - DataCite note on CN for any DOI: https://support.datacitate.org/docs/what-is-the-best-way-to-make-a-content-negotiation-request-for-any-doi  # noqa
 
 import io
 import difflib
@@ -46,24 +46,488 @@ SCOPUS_FALLBACK_URL = (
 )
 
 # --------------------------------------------------------------------
-# Page & Styles
+# Page & Styles - ELEGANT UI WITH BOUNCING BALLS
 # --------------------------------------------------------------------
-st.set_page_config(page_title="DOI Navigator", layout="wide", page_icon="🧭")
+st.set_page_config(page_title="DOI Navigator", layout="wide", page_icon="🔬", initial_sidebar_state="expanded")
+
+# Enhanced CSS with elegant colors and bouncing balls animation
 st.markdown("""
 <style>
-.stApp { background: #0b1220; color: #e5e7eb; }
-.big-title { color: #e5e7eb; font-size: 36px; font-weight: 850; letter-spacing: .2px; margin: 0 0 6px 0; }
-.section-card { background: #111827; border: 1px solid #1f2937; border-radius: 14px; padding: 16px 18px; box-shadow: 0 10px 24px rgba(0,0,0,.35); }
-div[data-baseweb="input"] input, textarea { background: #0f172a !important; color: #e5e7eb !important; border: 1px solid #334155 !important; border-radius: 10px !important; }
-.stSlider>div>div>div>div { background: #3b82f6 !important; } .stSlider>div>div>div[role="slider"] { background: #93c5fd !important; }
-.stButton>button, .stDownloadButton>button { background: #3b82f6; color: #fff; border-radius: 10px; padding: .55rem 1rem; border: 0; box-shadow: 0 8px 18px rgba(59,130,246,.35); }
-.stButton>button:hover, .stDownloadButton>button:hover { filter: brightness(1.06); }
-.dataframe-wrap { background: #0f172a; border: 1px solid #1f2937; border-radius: 14px; box-shadow: 0 10px 22px rgba(0,0,0,.35); padding: 8px; }
-.footer-credit { margin-top: 20px; text-align: center; color: #94a3b8; font-size: 13px; }
+@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700;800;900&display=swap');
+
+/* Global Styles - Elegant Color Scheme */
+.stApp {
+    background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+    font-family: 'Poppins', sans-serif;
+}
+
+/* Animated Background - Subtle and Elegant */
+.stApp::before {
+    content: '';
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-image: 
+        radial-gradient(circle at 20% 80%, rgba(233, 69, 96, 0.08) 0%, transparent 50%),
+        radial-gradient(circle at 80% 20%, rgba(52, 211, 153, 0.08) 0%, transparent 50%),
+        radial-gradient(circle at 40% 40%, rgba(94, 114, 228, 0.08) 0%, transparent 50%);
+    animation: gradientShift 25s ease infinite;
+    pointer-events: none;
+    z-index: -1;
+}
+
+@keyframes gradientShift {
+    0%, 100% { transform: translate(0, 0) rotate(0deg); }
+    33% { transform: translate(-15px, -15px) rotate(120deg); }
+    66% { transform: translate(15px, -10px) rotate(240deg); }
+}
+
+/* Bouncing Balls Animation */
+.bouncing-balls {
+    position: absolute;
+    width: 100%;
+    height: 100px;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    pointer-events: none;
+    z-index: 1;
+}
+
+.ball {
+    position: absolute;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    animation: bounce 2s infinite ease-in-out;
+}
+
+.ball:nth-child(1) {
+    left: 20%;
+    background: linear-gradient(135deg, #e94560, #ff6b6b);
+    animation-delay: 0s;
+    box-shadow: 0 0 20px rgba(233, 69, 96, 0.6);
+}
+
+.ball:nth-child(2) {
+    left: 35%;
+    background: linear-gradient(135deg, #34d399, #10b981);
+    animation-delay: 0.2s;
+    box-shadow: 0 0 20px rgba(52, 211, 153, 0.6);
+}
+
+.ball:nth-child(3) {
+    left: 50%;
+    background: linear-gradient(135deg, #5e72e4, #667eea);
+    animation-delay: 0.4s;
+    box-shadow: 0 0 20px rgba(94, 114, 228, 0.6);
+}
+
+.ball:nth-child(4) {
+    left: 65%;
+    background: linear-gradient(135deg, #f59e0b, #fbbf24);
+    animation-delay: 0.6s;
+    box-shadow: 0 0 20px rgba(245, 158, 11, 0.6);
+}
+
+.ball:nth-child(5) {
+    left: 80%;
+    background: linear-gradient(135deg, #8b5cf6, #a78bfa);
+    animation-delay: 0.8s;
+    box-shadow: 0 0 20px rgba(139, 92, 246, 0.6);
+}
+
+@keyframes bounce {
+    0%, 100% {
+        transform: translateY(0) scale(1);
+    }
+    50% {
+        transform: translateY(-30px) scale(1.1);
+    }
+}
+
+/* Header Styles - Elegant and Refined */
+.hero-section {
+    background: linear-gradient(135deg, rgba(94, 114, 228, 0.05), rgba(233, 69, 96, 0.05));
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 24px;
+    padding: 40px;
+    margin: -20px -50px 30px -50px;
+    backdrop-filter: blur(20px);
+    box-shadow: 
+        0 10px 40px rgba(0, 0, 0, 0.2),
+        inset 0 1px 0 rgba(255, 255, 255, 0.05);
+    animation: slideDown 0.6s ease-out;
+    position: relative;
+    overflow: visible;
+}
+
+@keyframes slideDown {
+    from { opacity: 0; transform: translateY(-30px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+.main-title {
+    font-size: 56px;
+    font-weight: 800;
+    background: linear-gradient(135deg, #e94560 0%, #34d399 25%, #5e72e4 50%, #f59e0b 75%, #8b5cf6 100%);
+    background-size: 400% 400%;
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    letter-spacing: -1px;
+    margin: 0;
+    animation: gradientFlow 10s ease infinite;
+    text-align: center;
+    position: relative;
+    z-index: 2;
+}
+
+@keyframes gradientFlow {
+    0%, 100% { background-position: 0% 50%; }
+    50% { background-position: 100% 50%; }
+}
+
+.subtitle {
+    color: #94a3b8;
+    font-size: 18px;
+    font-weight: 400;
+    text-align: center;
+    margin-top: 10px;
+    opacity: 0;
+    animation: fadeInUp 0.8s ease-out 0.3s forwards;
+}
+
+@keyframes fadeInUp {
+    to { opacity: 1; transform: translateY(0); }
+    from { opacity: 0; transform: translateY(10px); }
+}
+
+/* Card Styles - Elegant Glass Effect */
+.glass-card {
+    background: rgba(30, 41, 59, 0.4);
+    backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 20px;
+    padding: 24px;
+    margin: 20px 0;
+    box-shadow: 
+        0 8px 32px rgba(0, 0, 0, 0.3),
+        inset 0 1px 0 rgba(255, 255, 255, 0.03);
+    transition: all 0.3s ease;
+    animation: fadeIn 0.5s ease-out;
+}
+
+.glass-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 
+        0 12px 40px rgba(0, 0, 0, 0.4),
+        inset 0 1px 0 rgba(255, 255, 255, 0.05);
+    border-color: rgba(255, 255, 255, 0.08);
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; transform: scale(0.95); }
+    to { opacity: 1; transform: scale(1); }
+}
+
+/* Input Styles - Elegant Dark Theme */
+.stTextArea textarea, .stTextInput input {
+    background: rgba(15, 23, 42, 0.6) !important;
+    border: 2px solid rgba(94, 114, 228, 0.2) !important;
+    border-radius: 12px !important;
+    color: #e2e8f0 !important;
+    font-size: 15px !important;
+    padding: 12px 16px !important;
+    transition: all 0.3s ease !important;
+    backdrop-filter: blur(10px) !important;
+}
+
+.stTextArea textarea:focus, .stTextInput input:focus {
+    border-color: rgba(94, 114, 228, 0.5) !important;
+    box-shadow: 0 0 0 3px rgba(94, 114, 228, 0.1) !important;
+    background: rgba(15, 23, 42, 0.8) !important;
+}
+
+/* Button Styles - Elegant Gradients */
+.stButton > button {
+    background: linear-gradient(135deg, #5e72e4 0%, #667eea 100%);
+    color: white;
+    border: none;
+    border-radius: 12px;
+    padding: 12px 32px;
+    font-weight: 600;
+    font-size: 16px;
+    transition: all 0.3s ease;
+    box-shadow: 0 4px 15px rgba(94, 114, 228, 0.3);
+    position: relative;
+    overflow: hidden;
+}
+
+.stButton > button::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: -100%;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.15), transparent);
+    transition: left 0.5s ease;
+}
+
+.stButton > button:hover::before {
+    left: 100%;
+}
+
+.stButton > button:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(94, 114, 228, 0.4);
+}
+
+/* Primary Button Special Style */
+[data-testid="stButton"] button[kind="primary"] {
+    background: linear-gradient(135deg, #e94560 0%, #ff6b6b 100%);
+    box-shadow: 0 4px 15px rgba(233, 69, 96, 0.3);
+}
+
+/* Download Button */
+.stDownloadButton > button {
+    background: linear-gradient(135deg, #34d399 0%, #10b981 100%);
+    color: white;
+    border: none;
+    border-radius: 12px;
+    padding: 12px 32px;
+    font-weight: 600;
+    transition: all 0.3s ease;
+    box-shadow: 0 4px 15px rgba(52, 211, 153, 0.3);
+}
+
+.stDownloadButton > button:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(52, 211, 153, 0.4);
+}
+
+/* Slider Styles */
+.stSlider > div > div > div > div {
+    background: linear-gradient(90deg, #5e72e4, #e94560) !important;
+}
+
+.stSlider > div > div > div[role="slider"] {
+    background: white !important;
+    box-shadow: 0 2px 10px rgba(94, 114, 228, 0.4) !important;
+}
+
+/* Checkbox Styles */
+.stCheckbox label {
+    color: #e2e8f0 !important;
+    font-weight: 500;
+}
+
+/* DataFrame Styles */
+.dataframe-container {
+    background: rgba(15, 23, 42, 0.5);
+    border: 1px solid rgba(94, 114, 228, 0.15);
+    border-radius: 16px;
+    padding: 20px;
+    backdrop-filter: blur(10px);
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+    margin: 20px 0;
+    animation: slideUp 0.6s ease-out;
+}
+
+@keyframes slideUp {
+    from { opacity: 0; transform: translateY(20px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+[data-testid="stDataFrame"] {
+    background: transparent !important;
+}
+
+[data-testid="stTable"] {
+    background: transparent !important;
+}
+
+/* Progress Bar - Elegant Animation */
+.stProgress > div > div > div {
+    background: linear-gradient(90deg, #5e72e4, #e94560, #34d399) !important;
+    background-size: 200% 100%;
+    animation: progressGradient 2s ease infinite;
+    border-radius: 10px;
+    height: 8px !important;
+}
+
+@keyframes progressGradient {
+    0% { background-position: 0% 50%; }
+    100% { background-position: 200% 50%; }
+}
+
+/* Sidebar Styles - Elegant Dark */
+.css-1d391kg, [data-testid="stSidebar"] {
+    background: rgba(15, 23, 42, 0.95);
+    backdrop-filter: blur(20px);
+    border-right: 1px solid rgba(94, 114, 228, 0.15);
+}
+
+.sidebar-content {
+    padding: 20px;
+}
+
+/* Info/Success/Warning Messages */
+.stAlert {
+    background: rgba(94, 114, 228, 0.08) !important;
+    border: 1px solid rgba(94, 114, 228, 0.2) !important;
+    border-radius: 12px !important;
+    color: #e2e8f0 !important;
+    backdrop-filter: blur(10px);
+}
+
+/* Metrics Cards - Elegant Style */
+.metric-card {
+    background: linear-gradient(135deg, rgba(94, 114, 228, 0.08), rgba(233, 69, 96, 0.08));
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 16px;
+    padding: 20px;
+    text-align: center;
+    transition: all 0.3s ease;
+}
+
+.metric-card:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 10px 30px rgba(94, 114, 228, 0.2);
+}
+
+.metric-value {
+    font-size: 32px;
+    font-weight: 700;
+    background: linear-gradient(135deg, #5e72e4, #e94560);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+}
+
+.metric-label {
+    color: #94a3b8;
+    font-size: 14px;
+    font-weight: 500;
+    margin-top: 8px;
+}
+
+/* Footer */
+.footer-section {
+    margin-top: 60px;
+    padding: 30px;
+    background: rgba(15, 23, 42, 0.5);
+    border-radius: 20px;
+    border: 1px solid rgba(94, 114, 228, 0.15);
+    text-align: center;
+}
+
+.footer-credit {
+    color: #94a3b8;
+    font-size: 14px;
+    font-weight: 400;
+}
+
+.footer-credit a {
+    color: #5e72e4;
+    text-decoration: none;
+    transition: color 0.3s ease;
+}
+
+.footer-credit a:hover {
+    color: #e94560;
+}
+
+/* Spinner Enhancement */
+.stSpinner > div {
+    border-color: #5e72e4 !important;
+}
+
+/* Caption Styles */
+.caption-text {
+    color: #94a3b8;
+    font-size: 14px;
+    font-style: italic;
+    margin-top: 8px;
+}
+
+/* Section Headers - Elegant Style */
+.section-header {
+    color: #e2e8f0;
+    font-size: 24px;
+    font-weight: 700;
+    margin-bottom: 20px;
+    padding-bottom: 10px;
+    border-bottom: 2px solid rgba(94, 114, 228, 0.2);
+    position: relative;
+}
+
+.section-header::after {
+    content: '';
+    position: absolute;
+    bottom: -2px;
+    left: 0;
+    width: 60px;
+    height: 2px;
+    background: linear-gradient(90deg, #5e72e4, #e94560);
+}
+
+/* Stats Display */
+.stats-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 20px;
+    margin: 30px 0;
+}
+
+/* Fade in animation for elements */
+.fade-in {
+    animation: fadeInElement 0.8s ease-out;
+}
+
+@keyframes fadeInElement {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+/* Custom scrollbar - Elegant */
+::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+}
+
+::-webkit-scrollbar-track {
+    background: rgba(15, 23, 42, 0.5);
+}
+
+::-webkit-scrollbar-thumb {
+    background: linear-gradient(135deg, #5e72e4, #e94560);
+    border-radius: 5px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: linear-gradient(135deg, #e94560, #5e72e4);
+}
 </style>
 """, unsafe_allow_html=True)
-st.markdown('<div class="big-title">DOI Navigator</div>', unsafe_allow_html=True)
-st.caption("Paste DOIs. The app auto-loads JCR & Scopus. Download CSV.")
+
+# Hero Section with Bouncing Balls
+st.markdown("""
+<div class="hero-section">
+    <div class="bouncing-balls">
+        <div class="ball"></div>
+        <div class="ball"></div>
+        <div class="ball"></div>
+        <div class="ball"></div>
+        <div class="ball"></div>
+    </div>
+    <h1 class="main-title">🔬 DOI Navigator</h1>
+    <p class="subtitle">Advanced Research Paper Metadata Extraction & Analysis</p>
+</div>
+""", unsafe_allow_html=True)
 
 # --------------------------------------------------------------------
 # Session / networking
@@ -296,8 +760,8 @@ def fetch_parallel(dois: list[str], max_workers: int = 12) -> list[dict]:
     with ThreadPoolExecutor(max_workers=min(max_workers, max(1, len(dois)))) as ex:
         futs = {ex.submit(fetch_metadata_unified, d): d for d in dois}
         total, done = len(futs), 0
-        progress = st.progress(0.0, text="Starting…")
-        with st.spinner("🔎 Fetching metadata (with universal DOI fallback)…"):
+        progress = st.progress(0.0, text="Initializing...")
+        with st.spinner("🔍 Fetching metadata with universal DOI fallback..."):
             for fut in as_completed(futs):
                 doi = futs[fut]
                 data = fut.result()
@@ -315,7 +779,7 @@ def fetch_parallel(dois: list[str], max_workers: int = 12) -> list[dict]:
                     entry = {"DOI": doi, **data}
                 entries.append(entry)
                 done += 1
-                progress.progress(done / total, text=f"Processing {done}/{total}…")
+                progress.progress(done / total, text=f"Processing {done}/{total} papers...")
         progress.empty()
     entries.sort(key=lambda e: order.get(e["DOI"], 10**9))
     return entries
@@ -395,102 +859,253 @@ def merge_enrich_fast(df: pd.DataFrame, jcr: pd.DataFrame, scopus: pd.DataFrame,
     return out
 
 # --------------------------------------------------------------------
-# Sidebar
+# Sidebar with Enhanced UI
 # --------------------------------------------------------------------
 with st.sidebar:
-    st.markdown('<div class="section-card">', unsafe_allow_html=True)
-    st.subheader("Matching Settings")
-    min_score = st.slider("Fuzzy match minimum score", 60, 95, 80)
-    st.caption("Higher Score = Higher Accuracy. Start with Default Score")
-    wos_if_jcr = st.checkbox("Mark 'Indexed in Web of Science' if present in JCR", value=True)
-    scopus_exact = st.checkbox("Scopus: try exact normalized match before fuzzy", value=True)
-    st.markdown("---")
-    fast_workers = st.slider("Max parallel requests (metadata)", 2, 16, 12)
-    st.caption("Keep respectful concurrency for public APIs.")
+    st.markdown('<div class="sidebar-content">', unsafe_allow_html=True)
+    st.markdown('<h2 style="color: #e2e8f0; margin-bottom: 20px;">⚙️ Configuration</h2>', unsafe_allow_html=True)
+    
+    st.markdown('<div class="glass-card">', unsafe_allow_html=True)
+    st.markdown('<div class="section-header">Matching Settings</div>', unsafe_allow_html=True)
+    min_score = st.slider("🎯 Fuzzy Match Threshold", 60, 95, 80, 
+                          help="Higher score = stricter matching. Default: 80")
+    st.caption("💡 Tip: Start with default (80) for balanced accuracy")
+    
+    wos_if_jcr = st.checkbox("📊 Auto-mark WoS if in JCR", value=True,
+                             help="Automatically mark as indexed in Web of Science if found in JCR database")
+    scopus_exact = st.checkbox("🔍 Scopus exact match first", value=True,
+                              help="Try exact normalized matching before fuzzy matching for Scopus")
+    st.markdown('</div>', unsafe_allow_html=True)
+    
+    st.markdown('<div class="glass-card">', unsafe_allow_html=True)
+    st.markdown('<div class="section-header">Performance</div>', unsafe_allow_html=True)
+    fast_workers = st.slider("⚡ Parallel requests", 2, 16, 12,
+                             help="Number of concurrent API requests")
+    st.caption("🔒 Keep respectful to public APIs")
+    st.markdown('</div>', unsafe_allow_html=True)
+    
+    # Add statistics if data is loaded
+    if 'jcr_df' in st.session_state and 'sc_df' in st.session_state:
+        st.markdown('<div class="glass-card">', unsafe_allow_html=True)
+        st.markdown('<div class="section-header">📈 Database Stats</div>', unsafe_allow_html=True)
+        col1, col2 = st.columns(2)
+        with col1:
+            st.markdown(f'<div class="metric-card"><div class="metric-value">{len(st.session_state.jcr_df):,}</div><div class="metric-label">JCR Journals</div></div>', unsafe_allow_html=True)
+        with col2:
+            st.markdown(f'<div class="metric-card"><div class="metric-value">{len(st.session_state.sc_df):,}</div><div class="metric-label">Scopus Titles</div></div>', unsafe_allow_html=True)
+        st.markdown('</div>', unsafe_allow_html=True)
+    
     st.markdown('</div>', unsafe_allow_html=True)
 
 cfg = MatchCfg(min_score=min_score, wos_if_missing=wos_if_jcr, scopus_exact_first=scopus_exact)
 
 # --------------------------------------------------------------------
-# Main panel
+# Main panel with enhanced UI
 # --------------------------------------------------------------------
-st.markdown('<div class="section-card">', unsafe_allow_html=True)
-st.subheader("Enter DOIs")
-dois_text = st.text_area(
-    "Paste one DOI per line",
-    height=150,
-    placeholder="https://doi.org/10.1016/j.arr.2025.102847\nhttps://doi.org/10.1016/j.arr.2025.102834\nhttps://doi.org/10.17179/excli2014-541",
-)
+# Input Section
+st.markdown('<div class="glass-card fade-in">', unsafe_allow_html=True)
+st.markdown('<div class="section-header">📝 Input DOIs</div>', unsafe_allow_html=True)
+
+# Create tabs for different input methods
+tab1, tab2 = st.tabs(["📋 Paste DOIs", "📁 Upload File"])
+
+with tab1:
+    dois_text = st.text_area(
+        "Enter one DOI per line",
+        height=200,
+        placeholder="10.1016/j.arr.2025.102847\n10.1016/j.arr.2025.102834\n10.17179/excli2014-541\nhttps://doi.org/10.1038/nature12373",
+        help="You can paste DOIs with or without https://doi.org/ prefix"
+    )
+
+with tab2:
+    uploaded_file = st.file_uploader("Upload a text file with DOIs", type=['txt'])
+    if uploaded_file is not None:
+        dois_text = str(uploaded_file.read(), "utf-8")
+        st.success(f"✅ Loaded {len(dois_text.splitlines())} lines from file")
+
 st.markdown('</div>', unsafe_allow_html=True)
 
-st.markdown('<div class="section-card">', unsafe_allow_html=True)
-col1, col2 = st.columns([1, 1])
+# Action Buttons with enhanced styling
+st.markdown('<div class="glass-card fade-in">', unsafe_allow_html=True)
+col1, col2, col3 = st.columns([2, 2, 1])
 with col1:
-    fetch = st.button("Fetch Metadata", type="primary")
+    fetch = st.button("🚀 Fetch Metadata", type="primary", use_container_width=True)
 with col2:
-    clear = st.button("Clear")
+    clear = st.button("🗑️ Clear All", use_container_width=True)
+with col3:
+    # Display DOI count
+    raw_lines = [d for d in dois_text.splitlines() if d.strip()]
+    dois = list(dict.fromkeys(normalize_doi_input(d) for d in raw_lines))
+    st.markdown(f'<div class="metric-card"><div class="metric-value">{len(dois)}</div><div class="metric-label">DOIs</div></div>', unsafe_allow_html=True)
 st.markdown('</div>', unsafe_allow_html=True)
 
 if clear:
-    st.experimental_rerun()
-
-raw_lines = [d for d in dois_text.splitlines() if d.strip()]
-# de-dupe early so we do fewer network calls (preserves input order)
-dois = list(dict.fromkeys(normalize_doi_input(d) for d in raw_lines))
+    st.rerun()
 
 results_df = None
 
 def load_jcr_and_scopus():
-    jcr_url = st.secrets.get("JCR_URL", JCR_FALLBACK_URL)
-    scp_url = st.secrets.get("SCOPUS_URL", SCOPUS_FALLBACK_URL)
-    status = st.empty()
-    status.info("Loading JCR / Scopus lists…")
-    try:
-        jcr = load_jcr_cached(jcr_url) if jcr_url else pd.DataFrame(
-            columns=["Journal", "Impact Factor", "Quartile", "__norm"]
-        )
-        scp = load_scopus_cached(scp_url) if scp_url else pd.DataFrame(
-            columns=["Scopus Title", "__norm"]
-        )
-    finally:
-        status.empty()
+    # Use fallback URLs directly - no secrets needed
+    jcr_url = JCR_FALLBACK_URL
+    scp_url = SCOPUS_FALLBACK_URL
+    
+    # Create a nice loading container
+    with st.container():
+        st.markdown('<div class="glass-card">', unsafe_allow_html=True)
+        st.info("📄 Loading JCR and Scopus databases...")
+        progress_bar = st.progress(0)
+        status = st.empty()
+        
+        try:
+            status.text("Loading JCR database...")
+            progress_bar.progress(25)
+            jcr = load_jcr_cached(jcr_url) if jcr_url else pd.DataFrame(
+                columns=["Journal", "Impact Factor", "Quartile", "__norm"]
+            )
+            
+            status.text("Loading Scopus database...")
+            progress_bar.progress(75)
+            scp = load_scopus_cached(scp_url) if scp_url else pd.DataFrame(
+                columns=["Scopus Title", "__norm"]
+            )
+            
+            progress_bar.progress(100)
+            status.success("✅ Databases loaded successfully!")
+            
+            # Store in session state for statistics
+            st.session_state.jcr_df = jcr
+            st.session_state.sc_df = scp
+            
+            # Brief pause to show success
+            import time
+            time.sleep(1)
+            
+        finally:
+            progress_bar.empty()
+            status.empty()
+        
+        st.markdown('</div>', unsafe_allow_html=True)
+    
     return jcr, scp
 
 if fetch:
-    jcr_df, sc_df = load_jcr_and_scopus()
-
     if len(dois) == 0:
-        st.info("Enter at least one DOI.")
+        st.error("⚠️ Please enter at least one DOI to proceed.")
     else:
+        jcr_df, sc_df = load_jcr_and_scopus()
+        
+        # Fetch metadata with enhanced progress display
+        st.markdown('<div class="glass-card">', unsafe_allow_html=True)
+        st.markdown('<div class="section-header">🔍 Fetching Metadata</div>', unsafe_allow_html=True)
+        
         rows = fetch_parallel(dois, max_workers=fast_workers)
         base_df = pd.DataFrame(rows)
+        
         if not base_df.empty:
-            results_df = merge_enrich_fast(base_df, jcr_df, sc_df, cfg)
+            with st.spinner("📄 Matching with JCR and Scopus databases..."):
+                results_df = merge_enrich_fast(base_df, jcr_df, sc_df, cfg)
+            st.success(f"✅ Successfully processed {len(results_df)} papers!")
+        
+        st.markdown('</div>', unsafe_allow_html=True)
 
 # ---------- DISPLAY & DOWNLOAD ----------
 if results_df is not None and not results_df.empty:
     # 1-based index for display
     results_df.index = pd.RangeIndex(start=1, stop=len(results_df) + 1, name="S.No.")
-
-    # DISPLAY with bright tick emojis
+    
+    # Statistics Section
+    st.markdown('<div class="glass-card fade-in">', unsafe_allow_html=True)
+    st.markdown('<div class="section-header">📊 Analysis Summary</div>', unsafe_allow_html=True)
+    
+    col1, col2, col3, col4 = st.columns(4)
+    
+    # Calculate statistics
+    total_papers = len(results_df)
+    wos_count = results_df["Indexed in Web of Science"].sum()
+    scopus_count = results_df["Indexed in Scopus"].sum()
+    q1_count = (results_df["Quartile (JCR)"] == "Q1").sum()
+    
+    with col1:
+        st.markdown(f'''
+        <div class="metric-card">
+            <div class="metric-value">{total_papers}</div>
+            <div class="metric-label">Total Papers</div>
+        </div>
+        ''', unsafe_allow_html=True)
+    
+    with col2:
+        wos_pct = (wos_count/total_papers*100) if total_papers > 0 else 0
+        st.markdown(f'''
+        <div class="metric-card">
+            <div class="metric-value">{wos_count}</div>
+            <div class="metric-label">WoS Indexed ({wos_pct:.1f}%)</div>
+        </div>
+        ''', unsafe_allow_html=True)
+    
+    with col3:
+        scopus_pct = (scopus_count/total_papers*100) if total_papers > 0 else 0
+        st.markdown(f'''
+        <div class="metric-card">
+            <div class="metric-value">{scopus_count}</div>
+            <div class="metric-label">Scopus Indexed ({scopus_pct:.1f}%)</div>
+        </div>
+        ''', unsafe_allow_html=True)
+    
+    with col4:
+        q1_pct = (q1_count/total_papers*100) if total_papers > 0 else 0
+        st.markdown(f'''
+        <div class="metric-card">
+            <div class="metric-value">{q1_count}</div>
+            <div class="metric-label">Q1 Papers ({q1_pct:.1f}%)</div>
+        </div>
+        ''', unsafe_allow_html=True)
+    
+    st.markdown('</div>', unsafe_allow_html=True)
+    
+    # Results Table
+    st.markdown('<div class="glass-card fade-in">', unsafe_allow_html=True)
+    st.markdown('<div class="section-header">📑 Results Table</div>', unsafe_allow_html=True)
+    
+    # DISPLAY with enhanced emojis
     disp = results_df.copy()
-
+    
     def yn_to_emoji(v):
         if v is True:
-            return "✅"
+            return "✅ Yes"
         if v is False:
-            return "❌"
-        return ""
-
+            return "❌ No"
+        return "➖ N/A"
+    
+    def format_quartile(v):
+        if pd.isna(v) or v == "":
+            return "➖"
+        return f"🏆 {v}" if v == "Q1" else f"📊 {v}"
+    
     disp["Indexed in Scopus"] = disp["Indexed in Scopus"].map(yn_to_emoji)
     disp["Indexed in Web of Science"] = disp["Indexed in Web of Science"].map(yn_to_emoji)
-
-    st.markdown('<div class="dataframe-wrap">', unsafe_allow_html=True)
-    st.subheader("Results")
-    st.dataframe(disp, use_container_width=True)
+    disp["Quartile (JCR)"] = disp["Quartile (JCR)"].map(format_quartile)
+    
+    st.dataframe(
+        disp, 
+        use_container_width=True,
+        height=400,
+        column_config={
+            "DOI": st.column_config.TextColumn("DOI", help="Digital Object Identifier"),
+            "Title": st.column_config.TextColumn("Title", width="large"),
+            "Authors": st.column_config.TextColumn("Authors", width="medium"),
+            "Journal": st.column_config.TextColumn("Journal", width="medium"),
+            "Year": st.column_config.NumberColumn("Year", format="%d"),
+            "Citations (Crossref)": st.column_config.NumberColumn("Citations", format="%d"),
+            "Impact Factor (JCR)": st.column_config.NumberColumn("Impact Factor", format="%.1f"),
+        }
+    )
     st.markdown('</div>', unsafe_allow_html=True)
-
-    # DOWNLOAD: Excel-friendly text + UTF-8 BOM (prevents garbled characters)
+    
+    # Download Section
+    st.markdown('<div class="glass-card fade-in">', unsafe_allow_html=True)
+    st.markdown('<div class="section-header">💾 Export Options</div>', unsafe_allow_html=True)
+    
+    # DOWNLOAD: Excel-friendly text + UTF-8 BOM
     export_df = results_df.copy()
     export_df["Indexed in Scopus"] = export_df["Indexed in Scopus"].map(
         lambda v: "Yes" if v is True else "No" if v is False else ""
@@ -498,15 +1113,72 @@ if results_df is not None and not results_df.empty:
     export_df["Indexed in Web of Science"] = export_df["Indexed in Web of Science"].map(
         lambda v: "Yes" if v is True else "No" if v is False else ""
     )
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        csv_bytes = export_df.to_csv(index=True).encode("utf-8-sig")
+        st.download_button(
+            "📥 Download as CSV",
+            csv_bytes,
+            "doi_metadata.csv",
+            "text/csv",
+            use_container_width=True
+        )
+    
+    with col2:
+        # Create Excel file
+        from io import BytesIO
+        output = BytesIO()
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            export_df.to_excel(writer, index=True, sheet_name='DOI Metadata')
+        excel_data = output.getvalue()
+        
+        st.download_button(
+            "📊 Download as Excel",
+            excel_data,
+            "doi_metadata.xlsx",
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=True
+        )
+    
+    st.markdown('</div>', unsafe_allow_html=True)
 
-    csv_bytes = export_df.to_csv(index=True).encode("utf-8-sig")
-    st.download_button("Download CSV", csv_bytes, "doi_metadata.csv", "text/csv")
 else:
-    st.info("Enter DOIs and click **Fetch Metadata** to see results.")
+    # Welcome message when no data
+    st.markdown('<div class="glass-card fade-in">', unsafe_allow_html=True)
+    st.markdown("""
+    <div style="text-align: center; padding: 40px;">
+        <h2 style="color: #e2e8f0; margin-bottom: 20px;">👋 Welcome to DOI Navigator</h2>
+        <p style="color: #94a3b8; font-size: 16px; line-height: 1.6;">
+            Enter DOIs above and click <strong>Fetch Metadata</strong> to extract comprehensive paper information.<br>
+            The app automatically matches papers with JCR and Scopus databases for impact factors and indexing status.
+        </p>
+        <div style="margin-top: 30px; display: flex; justify-content: center; gap: 40px;">
+            <div style="text-align: center;">
+                <div style="font-size: 32px; margin-bottom: 10px;">📚</div>
+                <div style="color: #94a3b8; font-size: 14px;">Multi-DOI Support</div>
+            </div>
+            <div style="text-align: center;">
+                <div style="font-size: 32px; margin-bottom: 10px;">⚡</div>
+                <div style="color: #94a3b8; font-size: 14px;">Fast Processing</div>
+            </div>
+            <div style="text-align: center;">
+                <div style="font-size: 32px; margin-bottom: 10px;">🎯</div>
+                <div style="color: #94a3b8; font-size: 14px;">Accurate Matching</div>
+            </div>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+    st.markdown('</div>', unsafe_allow_html=True)
 
 # Footer
 year = datetime.now().year
-st.markdown(
-    f'<div class="footer-credit">© {year} · Developed by Dr. Kunal Bhattacharya</div>',
-    unsafe_allow_html=True,
-)
+st.markdown(f'''
+<div class="footer-section">
+    <div class="footer-credit">
+        <strong>DOI Navigator v1.1</strong><br>
+        © {year} · Developed with ❤️ by Dr. Kunal Bhattacharya<br>
+        <span style="font-size: 12px; color: #5e72e4;">Powered by Crossref API · JCR · Scopus</span>
+    </div>
+</div>
+''', unsafe_allow_html=True)
