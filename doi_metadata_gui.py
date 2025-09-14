@@ -6,7 +6,7 @@
 # - Speed: parallel requests + retries; 12h cache (JCR/Scopus), 7d cache (per-DOI)
 # - Matching: RapidFuzz vectorized cdist (fallback to difflib)
 # - Fallback for non-Crossref DOIs via DOI content negotiation (CSL-JSON)
-# - UI: dark theme; bright ticks on screen; CSV exports Yes/No with UTF-8 BOM
+# - UI: dark theme; bright ticks on screen; Excel exports with UTF-8 BOM
 # - Authors formatted "Given Family" (e.g., "Pravin D. Patil")
 #
 # References:
@@ -48,7 +48,7 @@ SCOPUS_FALLBACK_URL = (
 # --------------------------------------------------------------------
 # Page & Styles - ELEGANT UI WITH BOUNCING BALLS
 # --------------------------------------------------------------------
-st.set_page_config(page_title="DOI Navigator", layout="wide", page_icon="🔬", initial_sidebar_state="expanded")
+st.set_page_config(page_title="DOI Navigator", layout="wide", page_icon="🔍", initial_sidebar_state="expanded")
 
 # Enhanced CSS with elegant colors and bouncing balls animation
 st.markdown("""
@@ -205,34 +205,6 @@ st.markdown("""
     from { opacity: 0; transform: translateY(10px); }
 }
 
-/* Card Styles - Elegant Glass Effect */
-.glass-card {
-    background: rgba(30, 41, 59, 0.4);
-    backdrop-filter: blur(10px);
-    border: 1px solid rgba(255, 255, 255, 0.06);
-    border-radius: 20px;
-    padding: 24px;
-    margin: 20px 0;
-    box-shadow: 
-        0 8px 32px rgba(0, 0, 0, 0.3),
-        inset 0 1px 0 rgba(255, 255, 255, 0.03);
-    transition: all 0.3s ease;
-    animation: fadeIn 0.5s ease-out;
-}
-
-.glass-card:hover {
-    transform: translateY(-2px);
-    box-shadow: 
-        0 12px 40px rgba(0, 0, 0, 0.4),
-        inset 0 1px 0 rgba(255, 255, 255, 0.05);
-    border-color: rgba(255, 255, 255, 0.08);
-}
-
-@keyframes fadeIn {
-    from { opacity: 0; transform: scale(0.95); }
-    to { opacity: 1; transform: scale(1); }
-}
-
 /* Input Styles - Elegant Dark Theme */
 .stTextArea textarea, .stTextInput input {
     background: rgba(15, 23, 42, 0.6) !important;
@@ -371,10 +343,6 @@ st.markdown("""
     border-right: 1px solid rgba(94, 114, 228, 0.15);
 }
 
-.sidebar-content {
-    padding: 20px;
-}
-
 /* Info/Success/Warning Messages */
 .stAlert {
     background: rgba(94, 114, 228, 0.08) !important;
@@ -454,27 +422,6 @@ st.markdown("""
     margin-top: 8px;
 }
 
-/* Section Headers - Elegant Style */
-.section-header {
-    color: #e2e8f0;
-    font-size: 24px;
-    font-weight: 700;
-    margin-bottom: 20px;
-    padding-bottom: 10px;
-    border-bottom: 2px solid rgba(94, 114, 228, 0.2);
-    position: relative;
-}
-
-.section-header::after {
-    content: '';
-    position: absolute;
-    bottom: -2px;
-    left: 0;
-    width: 60px;
-    height: 2px;
-    background: linear-gradient(90deg, #5e72e4, #e94560);
-}
-
 /* Stats Display */
 .stats-grid {
     display: grid;
@@ -511,6 +458,14 @@ st.markdown("""
 ::-webkit-scrollbar-thumb:hover {
     background: linear-gradient(135deg, #e94560, #5e72e4);
 }
+
+/* Single Line Separator */
+hr {
+    border: 0;
+    height: 0.1px;
+    background: #94a3b8;
+    margin: 20px 0;
+}
 </style>
 """, unsafe_allow_html=True)
 
@@ -524,15 +479,12 @@ st.markdown("""
         <div class="ball"></div>
         <div class="ball"></div>
     </div>
-    <h1 class="main-title">🔬 DOI Navigator</h1>
+    <h1 class="main-title">🔍 DOI Navigator</h1>
     <p class="subtitle">Advanced Research Paper Metadata Extraction & Analysis</p>
 </div>
 """, unsafe_allow_html=True)
 
-# --------------------------------------------------------------------
 # Session / networking
-# --------------------------------------------------------------------
-@st.cache_resource(show_spinner=False)
 def _get_session() -> requests.Session:
     s = requests.Session()
     retries = Retry(
@@ -553,9 +505,7 @@ def _download_excel(url: str) -> io.BytesIO:
     r.raise_for_status()
     return io.BytesIO(r.content)
 
-# --------------------------------------------------------------------
 # DOI normalization (accept full https://doi.org/ links)
-# --------------------------------------------------------------------
 def normalize_doi_input(s: str) -> str:
     s = s.strip()
     low = s.lower()
@@ -565,9 +515,7 @@ def normalize_doi_input(s: str) -> str:
             break
     return s.strip()
 
-# --------------------------------------------------------------------
 # Matching config & helpers
-# --------------------------------------------------------------------
 @dataclass
 class MatchCfg:
     min_score: int = 80
@@ -582,9 +530,7 @@ def normalize_journal(s: str) -> str:
         s = s.replace(ch, " ")
     return " ".join(s.split())
 
-# --------------------------------------------------------------------
 # Readers (accept file-like objects)
-# --------------------------------------------------------------------
 def read_jcr(io_obj) -> pd.DataFrame:
     xls = pd.ExcelFile(io_obj, engine="openpyxl")
     df = pd.read_excel(xls, xls.sheet_names[0])
@@ -621,9 +567,7 @@ def read_scopus_titles(io_obj) -> pd.DataFrame:
     out["__norm"] = out["Scopus Title"].map(normalize_journal)
     return out
 
-# --------------------------------------------------------------------
 # Cache heavy loads (12h)
-# --------------------------------------------------------------------
 @st.cache_data(show_spinner=True, ttl=60*60*12)
 def load_jcr_cached(url: str) -> pd.DataFrame:
     return read_jcr(_download_excel(url))
@@ -632,9 +576,7 @@ def load_jcr_cached(url: str) -> pd.DataFrame:
 def load_scopus_cached(url: str) -> pd.DataFrame:
     return read_scopus_titles(_download_excel(url))
 
-# --------------------------------------------------------------------
 # Metadata fetchers: Crossref + DOI content negotiation fallback
-# --------------------------------------------------------------------
 def _crossref_fetch_raw(doi: str, timeout: float = 15.0) -> dict:
     url = f"https://api.crossref.org/works/{doi}"
     r = _get_session().get(url, timeout=timeout)
@@ -784,9 +726,7 @@ def fetch_parallel(dois: list[str], max_workers: int = 12) -> list[dict]:
     entries.sort(key=lambda e: order.get(e["DOI"], 10**9))
     return entries
 
-# --------------------------------------------------------------------
 # Batch merge with RapidFuzz cdist (very fast)
-# --------------------------------------------------------------------
 def merge_enrich_fast(df: pd.DataFrame, jcr: pd.DataFrame, scopus: pd.DataFrame, cfg: MatchCfg) -> pd.DataFrame:
     if df.empty:
         return df
@@ -858,15 +798,11 @@ def merge_enrich_fast(df: pd.DataFrame, jcr: pd.DataFrame, scopus: pd.DataFrame,
     out["Indexed in Web of Science"] = wos
     return out
 
-# --------------------------------------------------------------------
 # Sidebar with Enhanced UI
-# --------------------------------------------------------------------
 with st.sidebar:
-    st.markdown('<div class="sidebar-content">', unsafe_allow_html=True)
     st.markdown('<h2 style="color: #e2e8f0; margin-bottom: 20px;">⚙️ Configuration</h2>', unsafe_allow_html=True)
     
-    st.markdown('<div class="glass-card">', unsafe_allow_html=True)
-    st.markdown('<div class="section-header">Matching Settings</div>', unsafe_allow_html=True)
+    st.markdown('<h3 style="color: #e2e8f0;">Matching Settings</h3>', unsafe_allow_html=True)
     min_score = st.slider("🎯 Fuzzy Match Threshold", 60, 95, 80, 
                           help="Higher score = stricter matching. Default: 80")
     st.caption("💡 Tip: Start with default (80) for balanced accuracy")
@@ -875,40 +811,27 @@ with st.sidebar:
                              help="Automatically mark as indexed in Web of Science if found in JCR database")
     scopus_exact = st.checkbox("🔍 Scopus exact match first", value=True,
                               help="Try exact normalized matching before fuzzy matching for Scopus")
-    st.markdown('</div>', unsafe_allow_html=True)
+    st.markdown('<hr>', unsafe_allow_html=True)
     
-    st.markdown('<div class="glass-card">', unsafe_allow_html=True)
-    st.markdown('<div class="section-header">Performance</div>', unsafe_allow_html=True)
+    st.markdown('<h3 style="color: #e2e8f0;">Performance</h3>', unsafe_allow_html=True)
     fast_workers = st.slider("⚡ Parallel requests", 2, 16, 12,
                              help="Number of concurrent API requests")
     st.caption("🔒 Keep respectful to public APIs")
-    st.markdown('</div>', unsafe_allow_html=True)
+    st.markdown('<hr>', unsafe_allow_html=True)
     
-    # Add statistics if data is loaded
-    if 'jcr_df' in st.session_state and 'sc_df' in st.session_state:
-        st.markdown('<div class="glass-card">', unsafe_allow_html=True)
-        st.markdown('<div class="section-header">📈 Database Stats</div>', unsafe_allow_html=True)
-        col1, col2 = st.columns(2)
-        with col1:
-            st.markdown(f'<div class="metric-card"><div class="metric-value">{len(st.session_state.jcr_df):,}</div><div class="metric-label">JCR Journals</div></div>', unsafe_allow_html=True)
-        with col2:
-            st.markdown(f'<div class="metric-card"><div class="metric-value">{len(st.session_state.sc_df):,}</div><div class="metric-label">Scopus Titles</div></div>', unsafe_allow_html=True)
-        st.markdown('</div>', unsafe_allow_html=True)
-    
-    st.markdown('</div>', unsafe_allow_html=True)
+    # Permanent stats only
+    st.markdown('<h3 style="color: #e2e8f0;">📈 Database Stats</h3>', unsafe_allow_html=True)
+    st.markdown(f'<div class="metric-card"><div class="metric-value">29,270</div><div class="metric-label">JCR Journals Scanned</div></div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="metric-card"><div class="metric-value">47,838</div><div class="metric-label">Scopus Journals Scanned</div></div>', unsafe_allow_html=True)
 
 cfg = MatchCfg(min_score=min_score, wos_if_missing=wos_if_jcr, scopus_exact_first=scopus_exact)
 
-# --------------------------------------------------------------------
 # Main panel with enhanced UI
-# --------------------------------------------------------------------
 # Input Section
-st.markdown('<div class="glass-card fade-in">', unsafe_allow_html=True)
-st.markdown('<div class="section-header">📝 Input DOIs</div>', unsafe_allow_html=True)
+st.markdown('<h3 style="color: #e2e8f0;">📝 Input DOIs</h3>', unsafe_allow_html=True)
 
-# Create tabs for different input methods
-tab1, tab2 = st.tabs(["📋 Paste DOIs", "📁 Upload File"])
-
+# Create tab for input method
+tab1 = st.tabs(["📋 Paste DOIs"])[0]
 with tab1:
     dois_text = st.text_area(
         "Enter one DOI per line",
@@ -916,31 +839,27 @@ with tab1:
         placeholder="10.1016/j.arr.2025.102847\n10.1016/j.arr.2025.102834\n10.17179/excli2014-541\nhttps://doi.org/10.1038/nature12373",
         help="You can paste DOIs with or without https://doi.org/ prefix"
     )
-
-with tab2:
-    uploaded_file = st.file_uploader("Upload a text file with DOIs", type=['txt'])
-    if uploaded_file is not None:
-        dois_text = str(uploaded_file.read(), "utf-8")
-        st.success(f"✅ Loaded {len(dois_text.splitlines())} lines from file")
-
-st.markdown('</div>', unsafe_allow_html=True)
+st.markdown('<hr>', unsafe_allow_html=True)
 
 # Action Buttons with enhanced styling
-st.markdown('<div class="glass-card fade-in">', unsafe_allow_html=True)
+st.markdown('<h3 style="color: #e2e8f0;">Action Buttons</h3>', unsafe_allow_html=True)
 col1, col2, col3 = st.columns([2, 2, 1])
 with col1:
     fetch = st.button("🚀 Fetch Metadata", type="primary", use_container_width=True)
 with col2:
-    clear = st.button("🗑️ Clear All", use_container_width=True)
+    if st.button("🗑️ Clear All", use_container_width=True):
+        # Clear session state immediately
+        if 'jcr_df' in st.session_state:
+            del st.session_state.jcr_df
+        if 'sc_df' in st.session_state:
+            del st.session_state.sc_df
+        st.rerun()
 with col3:
     # Display DOI count
     raw_lines = [d for d in dois_text.splitlines() if d.strip()]
     dois = list(dict.fromkeys(normalize_doi_input(d) for d in raw_lines))
     st.markdown(f'<div class="metric-card"><div class="metric-value">{len(dois)}</div><div class="metric-label">DOIs</div></div>', unsafe_allow_html=True)
-st.markdown('</div>', unsafe_allow_html=True)
-
-if clear:
-    st.rerun()
+st.markdown('<hr>', unsafe_allow_html=True)
 
 results_df = None
 
@@ -951,7 +870,6 @@ def load_jcr_and_scopus():
     
     # Create a nice loading container
     with st.container():
-        st.markdown('<div class="glass-card">', unsafe_allow_html=True)
         st.info("📄 Loading JCR and Scopus databases...")
         progress_bar = st.progress(0)
         status = st.empty()
@@ -972,7 +890,7 @@ def load_jcr_and_scopus():
             progress_bar.progress(100)
             status.success("✅ Databases loaded successfully!")
             
-            # Store in session state for statistics
+            # Store in session state for processing
             st.session_state.jcr_df = jcr
             st.session_state.sc_df = scp
             
@@ -983,8 +901,6 @@ def load_jcr_and_scopus():
         finally:
             progress_bar.empty()
             status.empty()
-        
-        st.markdown('</div>', unsafe_allow_html=True)
     
     return jcr, scp
 
@@ -995,8 +911,7 @@ if fetch:
         jcr_df, sc_df = load_jcr_and_scopus()
         
         # Fetch metadata with enhanced progress display
-        st.markdown('<div class="glass-card">', unsafe_allow_html=True)
-        st.markdown('<div class="section-header">🔍 Fetching Metadata</div>', unsafe_allow_html=True)
+        st.markdown('<h3 style="color: #e2e8f0;">🔍 Fetching Metadata</h3>', unsafe_allow_html=True)
         
         rows = fetch_parallel(dois, max_workers=fast_workers)
         base_df = pd.DataFrame(rows)
@@ -1005,8 +920,7 @@ if fetch:
             with st.spinner("📄 Matching with JCR and Scopus databases..."):
                 results_df = merge_enrich_fast(base_df, jcr_df, sc_df, cfg)
             st.success(f"✅ Successfully processed {len(results_df)} papers!")
-        
-        st.markdown('</div>', unsafe_allow_html=True)
+        st.markdown('<hr>', unsafe_allow_html=True)
 
 # ---------- DISPLAY & DOWNLOAD ----------
 if results_df is not None and not results_df.empty:
@@ -1014,8 +928,7 @@ if results_df is not None and not results_df.empty:
     results_df.index = pd.RangeIndex(start=1, stop=len(results_df) + 1, name="S.No.")
     
     # Statistics Section
-    st.markdown('<div class="glass-card fade-in">', unsafe_allow_html=True)
-    st.markdown('<div class="section-header">📊 Analysis Summary</div>', unsafe_allow_html=True)
+    st.markdown('<h3 style="color: #e2e8f0;">📊 Analysis Summary</h3>', unsafe_allow_html=True)
     
     col1, col2, col3, col4 = st.columns(4)
     
@@ -1059,12 +972,10 @@ if results_df is not None and not results_df.empty:
             <div class="metric-label">Q1 Papers ({q1_pct:.1f}%)</div>
         </div>
         ''', unsafe_allow_html=True)
-    
-    st.markdown('</div>', unsafe_allow_html=True)
+    st.markdown('<hr>', unsafe_allow_html=True)
     
     # Results Table
-    st.markdown('<div class="glass-card fade-in">', unsafe_allow_html=True)
-    st.markdown('<div class="section-header">📑 Results Table</div>', unsafe_allow_html=True)
+    st.markdown('<h3 style="color: #e2e8f0;">📑 Results Table</h3>', unsafe_allow_html=True)
     
     # DISPLAY with enhanced emojis
     disp = results_df.copy()
@@ -1099,13 +1010,12 @@ if results_df is not None and not results_df.empty:
             "Impact Factor (JCR)": st.column_config.NumberColumn("Impact Factor", format="%.1f"),
         }
     )
-    st.markdown('</div>', unsafe_allow_html=True)
+    st.markdown('<hr>', unsafe_allow_html=True)
     
     # Download Section
-    st.markdown('<div class="glass-card fade-in">', unsafe_allow_html=True)
-    st.markdown('<div class="section-header">💾 Export Options</div>', unsafe_allow_html=True)
+    st.markdown('<h3 style="color: #e2e8f0;">💾 Export Options</h3>', unsafe_allow_html=True)
     
-    # DOWNLOAD: Excel-friendly text + UTF-8 BOM
+    # DOWNLOAD: Excel-friendly text
     export_df = results_df.copy()
     export_df["Indexed in Scopus"] = export_df["Indexed in Scopus"].map(
         lambda v: "Yes" if v is True else "No" if v is False else ""
@@ -1114,38 +1024,24 @@ if results_df is not None and not results_df.empty:
         lambda v: "Yes" if v is True else "No" if v is False else ""
     )
     
-    col1, col2 = st.columns(2)
-    with col1:
-        csv_bytes = export_df.to_csv(index=True).encode("utf-8-sig")
-        st.download_button(
-            "📥 Download as CSV",
-            csv_bytes,
-            "doi_metadata.csv",
-            "text/csv",
-            use_container_width=True
-        )
+    # Create Excel file
+    from io import BytesIO
+    output = BytesIO()
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        export_df.to_excel(writer, index=True, sheet_name='DOI Metadata')
+    excel_data = output.getvalue()
     
-    with col2:
-        # Create Excel file
-        from io import BytesIO
-        output = BytesIO()
-        with pd.ExcelWriter(output, engine='openpyxl') as writer:
-            export_df.to_excel(writer, index=True, sheet_name='DOI Metadata')
-        excel_data = output.getvalue()
-        
-        st.download_button(
-            "📊 Download as Excel",
-            excel_data,
-            "doi_metadata.xlsx",
-            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            use_container_width=True
-        )
-    
-    st.markdown('</div>', unsafe_allow_html=True)
+    st.download_button(
+        "📊 Download as Excel",
+        excel_data,
+        "doi_metadata.xlsx",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        use_container_width=True
+    )
+    st.markdown('<hr>', unsafe_allow_html=True)
 
 else:
     # Welcome message when no data
-    st.markdown('<div class="glass-card fade-in">', unsafe_allow_html=True)
     st.markdown("""
     <div style="text-align: center; padding: 40px;">
         <h2 style="color: #e2e8f0; margin-bottom: 20px;">👋 Welcome to DOI Navigator</h2>
@@ -1169,7 +1065,7 @@ else:
         </div>
     </div>
     """, unsafe_allow_html=True)
-    st.markdown('</div>', unsafe_allow_html=True)
+    st.markdown('<hr>', unsafe_allow_html=True)
 
 # Footer
 year = datetime.now().year
