@@ -1,23 +1,24 @@
 # doi_metadata_gui.py
-# DOI Navigator — ultra fast & cloud-friendly
+# DOI Navigator — fast, RA-agnostic (Crossref + DOI content negotiation fallback)
 #
-# - Paste DOIs (URLs like https://doi.org/... also work)
-# - JCR & Scopus auto-load from owner-provided URLs (Streamlit Secrets override fallbacks)
-# - Speed: JCR/Scopus cached 12h; Crossref parallel with retries + 7d cache
-# - Matching: RapidFuzz batch cdist (vectorized) with fallback to difflib
-# - UI: dark, bright ticks on-screen; CSV export uses "Yes/No" + UTF-8 BOM for Excel
-# - Authors column formatted as "Given Family" (e.g., "Pravin D. Patil")
+# - Paste DOIs (full https://doi.org/... also fine)
+# - JCR & Scopus auto-load (your Dropbox links; Streamlit Secrets can override)
+# - Speed: parallel requests + retries; 12h cache (JCR/Scopus), 7d cache (per-DOI)
+# - Matching: RapidFuzz vectorized cdist (fallback to difflib)
+# - Fallback for non-Crossref DOIs via DOI content negotiation (CSL-JSON)
+# - UI: dark theme; bright ticks on screen; CSV exports Yes/No with UTF-8 BOM
+# - Authors formatted "Given Family" (e.g., "Pravin D. Patil")
 #
 # References:
-# Crossref API usage & polite pool: https://api.crossref.org/swagger-ui/index.html#/
-# Streamlit caching: https://docs.streamlit.io/develop/api-reference/caching/st.cache_data
+# - DOI content negotiation works across RAs via doi.org: https://www.crossref.org/documentation/retrieve-metadata/content-negotiation/  # noqa
+# - DataCite note on CN for any DOI: https://support.datacite.org/docs/what-is-the-best-way-to-make-a-content-negotiation-request-for-any-doi  # noqa
 
 import io
 import difflib
-import typing as t
 from dataclasses import dataclass
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
+import typing as t
 
 import pandas as pd
 import requests
@@ -79,8 +80,8 @@ def _get_session() -> requests.Session:
     adapter = HTTPAdapter(max_retries=retries, pool_connections=64, pool_maxsize=64)
     s.mount("https://", adapter)
     s.mount("http://", adapter)
-    # Crossref polite pool: include a real email here
-    s.headers.update({"User-Agent": "DOI-Navigator/1.0 (mailto:your.email@domain)"})
+    # Polite pool: include a real email here
+    s.headers.update({"User-Agent": "DOI-Navigator/1.1 (mailto:your.email@domain)"})
     return s
 
 def _download_excel(url: str) -> io.BytesIO:
@@ -168,7 +169,7 @@ def load_scopus_cached(url: str) -> pd.DataFrame:
     return read_scopus_titles(_download_excel(url))
 
 # --------------------------------------------------------------------
-# Crossref fetching (parallel + 7d cache)
+# Metadata fetchers: Crossref + DOI content negotiation fallback
 # --------------------------------------------------------------------
 def _crossref_fetch_raw(doi: str, timeout: float = 15.0) -> dict:
     url = f"https://api.crossref.org/works/{doi}"
@@ -176,12 +177,22 @@ def _crossref_fetch_raw(doi: str, timeout: float = 15.0) -> dict:
     r.raise_for_status()
     return r.json().get("message", {})
 
+def _doi_content_negotiation(doi: str, timeout: float = 15.0) -> dict:
+    """
+    Universal fallback: request CSL-JSON via doi.org (works for Crossref/DataCite/mEDRA).
+    """
+    url = f"https://doi.org/{doi}"
+    headers = {"Accept": "application/vnd.citationstyles.csl+json"}
+    r = _get_session().get(url, headers=headers, timeout=timeout, allow_redirects=True)
+    r.raise_for_status()
+    return r.json()
+
 def _format_authors(msg: dict) -> str:
     """
     Build 'Given Family' for each author (e.g., 'Pravin D. Patil').
     - Keeps middle initials; adds a dot to single-letter initials
-    - Falls back to 'name'/'literal' if Crossref doesn't split given/family
-    - Joins authors with '; ' (no trailing semicolon)
+    - Falls back to 'name'/'literal' if not split
+    - Joins with '; ' (no trailing semicolon)
     """
     authors = msg.get("author", [])
     parts = []
@@ -190,7 +201,7 @@ def _format_authors(msg: dict) -> str:
         tokens = s.split()
         fixed = []
         for tok in tokens:
-            if len(tok) == 1 and tok.isalpha():  # single-letter initial
+            if len(tok) == 1 and tok.isalpha():
                 fixed.append(tok + ".")
             else:
                 fixed.append(tok)
@@ -203,25 +214,30 @@ def _format_authors(msg: dict) -> str:
             given = (a.get("given") or "").strip()
             family = (a.get("family") or "").strip()
             literal = (a.get("name") or a.get("literal") or "").strip()
-
             if given or family:
                 given_fixed = fix_initials(given)
                 name = (given_fixed + " " + family).strip()
             else:
                 name = literal
-
             if name:
                 parts.append(name)
 
     return "; ".join(parts)
 
-def _extract_fields(msg: dict) -> dict:
-    title = msg.get("title", [""])
-    title = title[0] if isinstance(title, list) and title else ""
-    authors = _format_authors(msg)
-    ctitle = msg.get("container-title", [""])
-    journal = ctitle[0] if isinstance(ctitle, list) and ctitle else ""
-    publisher = msg.get("publisher", "")
+def _first(x):
+    if isinstance(x, list):
+        return x[0] if x else ""
+    return x or ""
+
+def _extract_fields_generic(msg: dict, source: str) -> dict:
+    """
+    Works with both Crossref 'message' JSON and CSL-JSON from content negotiation.
+    """
+    title = _first(msg.get("title"))
+    # In CSL-JSON, container-title is usually a string; in Crossref it's a list
+    journal = _first(msg.get("container-title"))
+    publisher = msg.get("publisher", "") or msg.get("publisher-name", "")
+    # Year handling: support Crossref ('published-print'/'issued'/'published-online') and CSL 'issued'
     year = None
     for key in ["published-print", "issued", "published-online"]:
         obj = msg.get(key, {})
@@ -235,32 +251,53 @@ def _extract_fields(msg: dict) -> dict:
             year = int(str(msg.get("created", {}).get("date-time", ""))[:4])
         except Exception:
             year = None
-    cites = msg.get("is-referenced-by-count", None)
+
+    cites = msg.get("is-referenced-by-count", None) if source == "crossref" else None
+
     return {
         "Title": title,
-        "Authors": authors,
+        "Authors": _format_authors(msg),
         "Journal": journal,
         "Publisher": publisher,
         "Year": year,
-        "Citations (Crossref)": cites,
+        "Citations (Crossref)": cites,  # only present if Crossref provided it
     }
 
-@st.cache_data(show_spinner=False, ttl=60*60*24*7)  # cache each DOI for 7 days
-def fetch_crossref_cached(doi: str) -> dict:
+@st.cache_data(show_spinner=False, ttl=60*60*24*7)
+def fetch_metadata_unified(doi: str) -> dict:
+    """
+    Try Crossref first (gives us Crossref citations when available);
+    if not found, fallback to DOI content negotiation (CSL-JSON).
+    """
+    # 1) Crossref
     try:
-        return _extract_fields(_crossref_fetch_raw(doi))
-    except Exception as e:
-        return {"error": str(e)}
+        msg = _crossref_fetch_raw(doi)
+        data = _extract_fields_generic(msg, source="crossref")
+        if data.get("Title") or data.get("Journal"):
+            return data
+    except Exception:
+        pass
 
-def fetch_crossref_parallel(dois: list[str], max_workers: int = 12) -> list[dict]:
-    """Parallel Crossref fetch with progress; preserves input order."""
+    # 2) Fallback: DOI content negotiation (universal)
+    try:
+        csl = _doi_content_negotiation(doi)
+        data = _extract_fields_generic(csl, source="csl")
+        if data.get("Title") or data.get("Journal"):
+            return data
+    except Exception as e:
+        return {"error": f"Not found via Crossref; DOI content negotiation also failed: {e}"}
+
+    return {"error": "Metadata not available from Crossref or DOI content negotiation."}
+
+def fetch_parallel(dois: list[str], max_workers: int = 12) -> list[dict]:
+    """Parallel fetch with progress; preserves input order."""
     order = {d: i for i, d in enumerate(dois)}
     entries: list[dict] = []
     with ThreadPoolExecutor(max_workers=min(max_workers, max(1, len(dois)))) as ex:
-        futs = {ex.submit(fetch_crossref_cached, d): d for d in dois}
+        futs = {ex.submit(fetch_metadata_unified, d): d for d in dois}
         total, done = len(futs), 0
         progress = st.progress(0.0, text="Starting…")
-        with st.spinner("🔎 Searching Crossref and matching JCR / Scopus…"):
+        with st.spinner("🔎 Fetching metadata (with universal DOI fallback)…"):
             for fut in as_completed(futs):
                 doi = futs[fut]
                 data = fut.result()
@@ -280,7 +317,6 @@ def fetch_crossref_parallel(dois: list[str], max_workers: int = 12) -> list[dict
                 done += 1
                 progress.progress(done / total, text=f"Processing {done}/{total}…")
         progress.empty()
-    # sort back to input order
     entries.sort(key=lambda e: order.get(e["DOI"], 10**9))
     return entries
 
@@ -369,8 +405,8 @@ with st.sidebar:
     wos_if_jcr = st.checkbox("Mark 'Indexed in Web of Science' if present in JCR", value=True)
     scopus_exact = st.checkbox("Scopus: try exact normalized match before fuzzy", value=True)
     st.markdown("---")
-    fast_workers = st.slider("Max parallel requests (Crossref)", 2, 16, 12)
-    st.caption("Use a sensible number to stay polite with Crossref.")
+    fast_workers = st.slider("Max parallel requests (metadata)", 2, 16, 12)
+    st.caption("Keep respectful concurrency for public APIs.")
     st.markdown('</div>', unsafe_allow_html=True)
 
 cfg = MatchCfg(min_score=min_score, wos_if_missing=wos_if_jcr, scopus_exact_first=scopus_exact)
@@ -383,7 +419,7 @@ st.subheader("Enter DOIs")
 dois_text = st.text_area(
     "Paste one DOI per line",
     height=150,
-    placeholder="https://doi.org/10.1016/j.arr.2025.102847\nhttps://doi.org/10.1016/j.arr.2025.102834",
+    placeholder="https://doi.org/10.1016/j.arr.2025.102847\nhttps://doi.org/10.1016/j.arr.2025.102834\nhttps://doi.org/10.17179/excli2014-541",
 )
 st.markdown('</div>', unsafe_allow_html=True)
 
@@ -426,7 +462,7 @@ if fetch:
     if len(dois) == 0:
         st.info("Enter at least one DOI.")
     else:
-        rows = fetch_crossref_parallel(dois, max_workers=fast_workers)
+        rows = fetch_parallel(dois, max_workers=fast_workers)
         base_df = pd.DataFrame(rows)
         if not base_df.empty:
             results_df = merge_enrich_fast(base_df, jcr_df, sc_df, cfg)
