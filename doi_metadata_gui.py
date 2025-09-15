@@ -816,6 +816,75 @@ hr {
     background: var(--border-color);
     margin: 20px 0;
 }
+
+/* --- Ambient color aura around the DOI Navigator heading (light + dark) --- */
+.hero-section { position: relative; overflow: visible; }
+
+.hero-section::before,
+.hero-section::after {
+  content: "";
+  position: absolute;
+  inset: -60px -80px;
+  z-index: 0;
+  pointer-events: none;
+  filter: blur(28px);
+  opacity: 0.55;
+  animation: auraDrift 26s ease-in-out infinite;
+  background:
+    radial-gradient(40% 35% at 18% 28%, rgba(233,69,96,0.25), transparent 60%),
+    radial-gradient(45% 40% at 82% 30%, rgba(94,114,228,0.22), transparent 60%),
+    radial-gradient(38% 35% at 25% 80%, rgba(52,211,153,0.22), transparent 60%),
+    radial-gradient(35% 30% at 78% 78%, rgba(245,158,11,0.22), transparent 60%);
+}
+.hero-section::after {
+  filter: blur(36px);
+  opacity: 0.35;
+  animation-duration: 34s;
+}
+
+.main-title { position: relative; z-index: 2; }
+.main-title::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 105%;
+  height: 150%;
+  transform: translate(-50%, -50%);
+  z-index: 0;
+  pointer-events: none;
+  opacity: 0.28;
+  filter: blur(10px);
+  background:
+    conic-gradient(from 0turn,
+      rgba(233,69,96,0.28),
+      rgba(94,114,228,0.28),
+      rgba(52,211,153,0.28),
+      rgba(245,158,11,0.28),
+      rgba(139,92,246,0.28),
+      rgba(233,69,96,0.28));
+  border-radius: 60%;
+  animation: haloSpin 22s linear infinite;
+}
+
+@keyframes auraDrift {
+  0%   { transform: translate(0,0) scale(1); }
+  33%  { transform: translate(-12px,-8px) scale(1.03); }
+  66%  { transform: translate(10px,7px) scale(0.98); }
+  100% { transform: translate(0,0) scale(1); }
+}
+@keyframes haloSpin {
+  0%   { transform: translate(-50%, -50%) rotate(0turn); }
+  100% { transform: translate(-50%, -50%) rotate(1turn); }
+}
+
+@media (prefers-color-scheme: dark) {
+  .hero-section::before,
+  .hero-section::after { opacity: 0.48; }
+  .main-title::after { opacity: 0.22; }
+}
+/* --- End ambient title aura --- */
+
 </style>
 """, unsafe_allow_html=True)
 
@@ -1412,3 +1481,49 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+st.markdown('''<style>
+/* ==== Light-theme visibility boost around the DOI Navigator heading ==== */
+@media (prefers-color-scheme: light){
+  /* Make the ambient aura stronger & crisper on white */
+  .hero-section::before,
+  .hero-section::after{
+    opacity: 0.78 !important;
+    filter: blur(26px) saturate(1.1) !important;
+  }
+  /* Add a soft readable shadow to the title text only in light mode */
+  .main-title{
+    text-shadow:
+      0 1px 0 rgba(0,0,0,0.04),
+      0 6px 24px rgba(16,24,40,0.12);
+  }
+  /* Subtle animated highlight bar under the title for contrast */
+  .main-title::before{
+    content:"";
+    position:absolute;
+    left:50%;
+    bottom:-12px;
+    transform:translateX(-50%);
+    width:min(42vw, 360px);
+    height:12px;
+    border-radius:9999px;
+    background: linear-gradient(90deg,
+      rgba(233,69,96,0.35), rgba(94,114,228,0.35),
+      rgba(52,211,153,0.35), rgba(245,158,11,0.35),
+      rgba(139,92,246,0.35), rgba(233,69,96,0.35));
+    background-size: 200% 100%;
+    filter: blur(10px);
+    opacity:.85;
+    animation: titleShimmer 5.5s ease-in-out infinite;
+    pointer-events:none;
+    z-index: 1;
+  }
+}
+@keyframes titleShimmer{
+  0%{ background-position: 0% 50%; }
+  50%{ background-position: 100% 50%; }
+  100%{ background-position: 0% 50%; }
+}
+/* ==== End light-theme visibility boost ==== */
+</style>''', unsafe_allow_html=True)
