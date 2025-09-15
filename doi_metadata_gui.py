@@ -504,12 +504,169 @@ def run_original_app():
         inset 0 1px 0 var(--border-light);
     animation: slideDown 0.6s ease-out;
     position: relative;
-    overflow: visible;
+    overflow: hidden;  /* Changed from visible to hidden */
+    min-height: 200px;  /* Added minimum height */
+}
+
+/* Particle Canvas */
+#particleCanvas {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    opacity: 0.6;
 }
 
 @keyframes slideDown {
     from { opacity: 0; transform: translateY(-30px); }
     to { opacity: 1; transform: translateY(0); }
+}
+/* Geometric Background Pattern */
+.geometric-bg {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    opacity: 0.1;
+}
+
+.geo-shape {
+    position: absolute;
+    border: 2px solid;
+    border-radius: 30% 70% 70% 30% / 30% 30% 70% 70%;
+    animation: morphShape 15s ease-in-out infinite;
+}
+
+.geo-shape-1 {
+    width: 300px;
+    height: 300px;
+    top: -100px;
+    left: -100px;
+    border-color: #e94560;
+    animation-delay: 0s;
+}
+
+.geo-shape-2 {
+    width: 200px;
+    height: 200px;
+    top: 50%;
+    right: -50px;
+    border-color: #34d399;
+    animation-delay: 3s;
+}
+
+.geo-shape-3 {
+    width: 150px;
+    height: 150px;
+    bottom: -50px;
+    left: 20%;
+    border-color: #5e72e4;
+    animation-delay: 6s;
+}
+
+.geo-shape-4 {
+    width: 250px;
+    height: 250px;
+    top: 20%;
+    left: 40%;
+    border-color: #f59e0b;
+    animation-delay: 9s;
+}
+
+.geo-shape-5 {
+    width: 180px;
+    height: 180px;
+    bottom: 10%;
+    right: 20%;
+    border-color: #8b5cf6;
+    animation-delay: 12s;
+}
+
+.geo-shape-6 {
+    width: 220px;
+    height: 220px;
+    top: -50px;
+    right: 30%;
+    border-color: #10b981;
+    animation-delay: 15s;
+}
+
+@keyframes morphShape {
+    0%, 100% {
+        border-radius: 30% 70% 70% 30% / 30% 30% 70% 70%;
+        transform: rotate(0deg) scale(1);
+    }
+    25% {
+        border-radius: 70% 30% 30% 70% / 70% 70% 30% 30%;
+        transform: rotate(90deg) scale(1.1);
+    }
+    50% {
+        border-radius: 30% 70% 70% 30% / 70% 30% 30% 70%;
+        transform: rotate(180deg) scale(0.9);
+    }
+    75% {
+        border-radius: 70% 30% 30% 70% / 30% 70% 70% 30%;
+        transform: rotate(270deg) scale(1.05);
+    }
+}
+
+/* Floating Dots Animation */
+.floating-dots {
+    position: absolute;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+}
+
+.floating-dots span {
+    position: absolute;
+    display: block;
+    width: 20px;
+    height: 20px;
+    background: linear-gradient(135deg, #5e72e4, #e94560);
+    border-radius: 50%;
+    opacity: 0.1;
+    animation: floatUp 15s linear infinite;
+}
+
+.floating-dots span:nth-child(1) { left: 5%; animation-delay: 0s; width: 15px; height: 15px; }
+.floating-dots span:nth-child(2) { left: 15%; animation-delay: 1s; width: 12px; height: 12px; }
+.floating-dots span:nth-child(3) { left: 25%; animation-delay: 2s; width: 18px; height: 18px; }
+.floating-dots span:nth-child(4) { left: 35%; animation-delay: 3s; width: 10px; height: 10px; }
+.floating-dots span:nth-child(5) { left: 45%; animation-delay: 4s; width: 22px; height: 22px; }
+.floating-dots span:nth-child(6) { left: 55%; animation-delay: 5s; width: 14px; height: 14px; }
+.floating-dots span:nth-child(7) { left: 65%; animation-delay: 6s; width: 16px; height: 16px; }
+.floating-dots span:nth-child(8) { left: 75%; animation-delay: 7s; width: 20px; height: 20px; }
+.floating-dots span:nth-child(9) { left: 85%; animation-delay: 8s; width: 11px; height: 11px; }
+.floating-dots span:nth-child(10) { left: 95%; animation-delay: 9s; width: 25px; height: 25px; }
+.floating-dots span:nth-child(11) { left: 10%; animation-delay: 10s; width: 13px; height: 13px; }
+.floating-dots span:nth-child(12) { left: 30%; animation-delay: 11s; width: 17px; height: 17px; }
+.floating-dots span:nth-child(13) { left: 50%; animation-delay: 12s; width: 19px; height: 19px; }
+.floating-dots span:nth-child(14) { left: 70%; animation-delay: 13s; width: 15px; height: 15px; }
+.floating-dots span:nth-child(15) { left: 90%; animation-delay: 14s; width: 21px; height: 21px; }
+
+@keyframes floatUp {
+    0% {
+        bottom: -100px;
+        transform: translateX(0);
+    }
+    25% {
+        transform: translateX(-30px);
+    }
+    50% {
+        transform: translateX(30px);
+    }
+    75% {
+        transform: translateX(-15px);
+    }
+    100% {
+        bottom: calc(100% + 100px);
+        transform: translateX(0);
+    }
 }
 
 .main-title {
@@ -816,81 +973,25 @@ hr {
     background: var(--border-color);
     margin: 20px 0;
 }
-
-/* --- Ambient color aura around the DOI Navigator heading (light + dark) --- */
-.hero-section { position: relative; overflow: visible; }
-
-.hero-section::before,
-.hero-section::after {
-  content: "";
-  position: absolute;
-  inset: -60px -80px;
-  z-index: 0;
-  pointer-events: none;
-  filter: blur(28px);
-  opacity: 0.55;
-  animation: auraDrift 26s ease-in-out infinite;
-  background:
-    radial-gradient(40% 35% at 18% 28%, rgba(233,69,96,0.25), transparent 60%),
-    radial-gradient(45% 40% at 82% 30%, rgba(94,114,228,0.22), transparent 60%),
-    radial-gradient(38% 35% at 25% 80%, rgba(52,211,153,0.22), transparent 60%),
-    radial-gradient(35% 30% at 78% 78%, rgba(245,158,11,0.22), transparent 60%);
-}
-.hero-section::after {
-  filter: blur(36px);
-  opacity: 0.35;
-  animation-duration: 34s;
-}
-
-.main-title { position: relative; z-index: 2; }
-.main-title::after {
-  content: "";
-  position: absolute;
-  left: 50%;
-  top: 50%;
-  width: 105%;
-  height: 150%;
-  transform: translate(-50%, -50%);
-  z-index: 0;
-  pointer-events: none;
-  opacity: 0.28;
-  filter: blur(10px);
-  background:
-    conic-gradient(from 0turn,
-      rgba(233,69,96,0.28),
-      rgba(94,114,228,0.28),
-      rgba(52,211,153,0.28),
-      rgba(245,158,11,0.28),
-      rgba(139,92,246,0.28),
-      rgba(233,69,96,0.28));
-  border-radius: 60%;
-  animation: haloSpin 22s linear infinite;
-}
-
-@keyframes auraDrift {
-  0%   { transform: translate(0,0) scale(1); }
-  33%  { transform: translate(-12px,-8px) scale(1.03); }
-  66%  { transform: translate(10px,7px) scale(0.98); }
-  100% { transform: translate(0,0) scale(1); }
-}
-@keyframes haloSpin {
-  0%   { transform: translate(-50%, -50%) rotate(0turn); }
-  100% { transform: translate(-50%, -50%) rotate(1turn); }
-}
-
-@media (prefers-color-scheme: dark) {
-  .hero-section::before,
-  .hero-section::after { opacity: 0.48; }
-  .main-title::after { opacity: 0.22; }
-}
-/* --- End ambient title aura --- */
-
 </style>
 """, unsafe_allow_html=True)
 
-    # Hero Section with Bouncing Balls
+  # Hero Section with Enhanced Background Animation
     st.markdown("""
 <div class="hero-section">
+    <div class="geometric-bg">
+        <div class="geo-shape geo-shape-1"></div>
+        <div class="geo-shape geo-shape-2"></div>
+        <div class="geo-shape geo-shape-3"></div>
+        <div class="geo-shape geo-shape-4"></div>
+        <div class="geo-shape geo-shape-5"></div>
+        <div class="geo-shape geo-shape-6"></div>
+    </div>
+    <div class="floating-dots">
+        <span></span><span></span><span></span><span></span><span></span>
+        <span></span><span></span><span></span><span></span><span></span>
+        <span></span><span></span><span></span><span></span><span></span>
+    </div>
     <div class="bouncing-balls">
         <div class="ball"></div>
         <div class="ball"></div>
@@ -1218,7 +1319,6 @@ hr {
         st.markdown('<h3 style="color: var(--text-primary);">Performance</h3>', unsafe_allow_html=True)
         fast_workers = st.slider("⚡ Parallel requests", 2, 16, 12,
                                  help="Number of concurrent API requests")
-        st.caption("📢 Keep respectful to public APIs")
         st.markdown('<hr>', unsafe_allow_html=True)
         
         st.markdown('<h3 style="color: var(--text-primary);">📈 Database Stats</h3>', unsafe_allow_html=True)
@@ -1481,49 +1581,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
-st.markdown('''<style>
-/* ==== Light-theme visibility boost around the DOI Navigator heading ==== */
-@media (prefers-color-scheme: light){
-  /* Make the ambient aura stronger & crisper on white */
-  .hero-section::before,
-  .hero-section::after{
-    opacity: 0.78 !important;
-    filter: blur(26px) saturate(1.1) !important;
-  }
-  /* Add a soft readable shadow to the title text only in light mode */
-  .main-title{
-    text-shadow:
-      0 1px 0 rgba(0,0,0,0.04),
-      0 6px 24px rgba(16,24,40,0.12);
-  }
-  /* Subtle animated highlight bar under the title for contrast */
-  .main-title::before{
-    content:"";
-    position:absolute;
-    left:50%;
-    bottom:-12px;
-    transform:translateX(-50%);
-    width:min(42vw, 360px);
-    height:12px;
-    border-radius:9999px;
-    background: linear-gradient(90deg,
-      rgba(233,69,96,0.35), rgba(94,114,228,0.35),
-      rgba(52,211,153,0.35), rgba(245,158,11,0.35),
-      rgba(139,92,246,0.35), rgba(233,69,96,0.35));
-    background-size: 200% 100%;
-    filter: blur(10px);
-    opacity:.85;
-    animation: titleShimmer 5.5s ease-in-out infinite;
-    pointer-events:none;
-    z-index: 1;
-  }
-}
-@keyframes titleShimmer{
-  0%{ background-position: 0% 50%; }
-  50%{ background-position: 100% 50%; }
-  100%{ background-position: 0% 50%; }
-}
-/* ==== End light-theme visibility boost ==== */
-</style>''', unsafe_allow_html=True)
