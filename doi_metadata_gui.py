@@ -700,13 +700,6 @@ hr {
 </div>
 """, unsafe_allow_html=True)
     
-    # Add logout button in sidebar
-    with st.sidebar:
-        if st.button("🚪 Logout", use_container_width=True):
-            st.session_state.authenticated = False
-            st.rerun()
-        st.markdown("---")
-
     # Session / networking (UNCHANGED from original)
     def _get_session() -> requests.Session:
         s = requests.Session()
