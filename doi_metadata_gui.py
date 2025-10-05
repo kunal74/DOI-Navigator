@@ -24,6 +24,309 @@ try:
     _USE_RAPIDFUZZ = True
 except Exception:
     _USE_RAPIDFUZZ = False
+
+# --------------------------------------------------------------------
+# Database Setup for User Management (UNCHANGED)
+# --------------------------------------------------------------------
+DB_PATH = "doi_navigator_users.db"
+
+def init_database():
+    """Initialize the SQLite database for user management"""
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    
+    # Users table
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT UNIQUE NOT NULL,
+            email TEXT UNIQUE NOT NULL,
+            password_hash TEXT NOT NULL,
+            full_name TEXT,
+            organization TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            last_login TIMESTAMP,
+            is_active BOOLEAN DEFAULT 1
+        )
+    ''')
+    
+    # Login history table
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS login_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
+            login_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            ip_address TEXT,
+            user_agent TEXT,
+            FOREIGN KEY (user_id) REFERENCES users (id)
+        )
+    ''')
+    
+    conn.commit()
+    conn.close()
+
+def hash_password(password: str) -> str:
+    """Hash a password using SHA-256"""
+    return hashlib.sha256(password.encode()).hexdigest()
+
+def verify_user(username: str, password: str) -> dict:
+    """Verify user credentials"""
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    
+    password_hash = hash_password(password)
+    c.execute('''
+        SELECT id, username, email, full_name, organization 
+        FROM users 
+        WHERE (username = ? OR email = ?) AND password_hash = ? AND is_active = 1
+    ''', (username, username, password_hash))
+    
+    user = c.fetchone()
+    conn.close()
+    
+    if user:
+        return {
+            'id': user[0],
+            'username': user[1],
+            'email': user[2],
+            'full_name': user[3],
+            'organization': user[4]
+        }
+    return None
+
+def create_user(username: str, email: str, password: str, full_name: str = "", organization: str = "") -> tuple:
+    """Create a new user account"""
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    
+    try:
+        password_hash = hash_password(password)
+        c.execute('''
+            INSERT INTO users (username, email, password_hash, full_name, organization)
+            VALUES (?, ?, ?, ?, ?)
+        ''', (username, email, password_hash, full_name, organization))
+        conn.commit()
+        conn.close()
+        return True, "Account created successfully!"
+    except sqlite3.IntegrityError as e:
+        conn.close()
+        if 'username' in str(e):
+            return False, "Username already exists!"
+        elif 'email' in str(e):
+            return False, "Email already registered!"
+        else:
+            return False, "Registration failed. Please try again."
+
+def log_login(user_id: int):
+    """Log user login"""
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    
+    c.execute('''
+        UPDATE users SET last_login = CURRENT_TIMESTAMP WHERE id = ?
+    ''', (user_id,))
+    
+    c.execute('''
+        INSERT INTO login_history (user_id, ip_address, user_agent)
+        VALUES (?, ?, ?)
+    ''', (user_id, "N/A", "Streamlit App"))
+    
+    conn.commit()
+    conn.close()
+
+def validate_email(email: str) -> bool:
+    """Validate email format"""
+    pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+    return re.match(pattern, email) is not None
+
+# --------------------------------------------------------------------
+# Login Interface with Adaptive Theme
+# --------------------------------------------------------------------
+def show_login_page():
+    """Display the login page with adaptive theme"""
+    st.set_page_config(page_title="DOI Navigator - Login", layout="wide", page_icon="🔍", initial_sidebar_state="collapsed")
+    
+    # Adaptive Login page CSS
+    st.markdown("""
+    <style>
+    @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700;800;900&display=swap');
+    
+    /* CSS Variables for Light/Dark Theme Support */
+    :root {
+        --primary-bg: #ffffff;
+        --secondary-bg: #f8f9fa;
+        --card-bg: rgba(255, 255, 255, 0.95);
+        --text-primary: #1a1a2e;
+        --text-secondary: #6c757d;
+        --border-color: rgba(0, 0, 0, 0.1);
+        --shadow-light: rgba(0, 0, 0, 0.1);
+        --shadow-medium: rgba(0, 0, 0, 0.15);
+        --input-bg: rgba(255, 255, 255, 0.8);
+        --input-border: rgba(94, 114, 228, 0.3);
+    }
+    
+    /* Dark theme detection */
+    @media (prefers-color-scheme: dark) {
+        :root {
+            --primary-bg: #1a1a2e;
+            --secondary-bg: #16213e;
+            --card-bg: rgba(15, 23, 42, 0.95);
+            --text-primary: #e2e8f0;
+            --text-secondary: #94a3b8;
+            --border-color: rgba(255, 255, 255, 0.1);
+            --shadow-light: rgba(0, 0, 0, 0.3);
+            --shadow-medium: rgba(0, 0, 0, 0.4);
+            --input-bg: rgba(15, 23, 42, 0.8);
+            --input-border: rgba(94, 114, 228, 0.4);
+        }
+    }
+    
+    .stApp {
+        background: linear-gradient(135deg, var(--primary-bg) 0%, var(--secondary-bg) 50%, var(--primary-bg) 100%);
+        font-family: 'Poppins', sans-serif;
+        color: var(--text-primary);
+    }
+    
+    .auth-title {
+        font-size: 48px;
+        font-weight: 800;
+        background: linear-gradient(135deg, #e94560 0%, #34d399 25%, #5e72e4 50%, #f59e0b 75%, #8b5cf6 100%);
+        background-size: 400% 400%;
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
+        animation: gradientFlow 10s ease infinite;
+        text-align: center;
+        margin-bottom: 10px;
+    }
+    
+    @keyframes gradientFlow {
+        0%, 100% { background-position: 0% 50%; }
+        50% { background-position: 100% 50%; }
+    }
+    
+    .stTextInput input {
+        background: var(--input-bg) !important;
+        border: 2px solid var(--input-border) !important;
+        border-radius: 12px !important;
+        color: var(--text-primary) !important;
+        padding: 12px 16px !important;
+    }
+    
+    .stTextInput input::placeholder {
+        color: var(--text-secondary) !important;
+        opacity: 0.7;
+    }
+    
+    .stButton > button {
+        background: linear-gradient(135deg, #5e72e4 0%, #667eea 100%);
+        color: white;
+        border: none;
+        border-radius: 12px;
+        padding: 12px 32px;
+        font-weight: 600;
+        box-shadow: 0 4px 15px rgba(94, 114, 228, 0.3);
+    }
+    
+    /* Ensure text visibility in both themes */
+    .stMarkdown, .stText, p {
+        color: var(--text-primary) !important;
+    }
+    
+    .stTabs [data-baseweb="tab-list"] {
+        gap: 8px;
+    }
+    
+    .stTabs [data-baseweb="tab"] {
+        background-color: var(--card-bg);
+        border: 1px solid var(--border-color);
+        border-radius: 8px;
+        color: var(--text-primary);
+    }
+    
+    .stTabs [aria-selected="true"] {
+        background-color: var(--input-bg);
+        border-color: #5e72e4;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+    
+    # Center the login form
+    col1, col2, col3 = st.columns([1, 2, 1])
+    
+    with col2:
+        st.markdown('<h1 class="auth-title">🔍 DOI Navigator</h1>', unsafe_allow_html=True)
+        st.markdown('<p style="text-align: center; color: var(--text-secondary); margin-bottom: 30px;">Sign in to access the research paper metadata tool</p>', unsafe_allow_html=True)
+        
+        tab1, tab2 = st.tabs(["🔐 Login", "📝 Sign Up"])
+        
+        with tab1:
+            with st.form("login_form"):
+                username = st.text_input("Username or Email", placeholder="Enter your username or email")
+                password = st.text_input("Password", type="password", placeholder="Enter your password")
+                
+                col_a, col_b = st.columns(2)
+                with col_a:
+                    submit = st.form_submit_button("🚀 Sign In", use_container_width=True, type="primary")
+                
+                if submit:
+                    if username and password:
+                        user = verify_user(username, password)
+                        if user:
+                            st.session_state.authenticated = True
+                            st.session_state.user = user
+                            log_login(user['id'])
+                            st.success(f"Welcome, {user['full_name'] or user['username']}!")
+                            st.rerun()
+                        else:
+                            st.error("Invalid credentials. Please try again.")
+                    else:
+                        st.warning("Please enter both username/email and password.")
+        
+        with tab2:
+            with st.form("signup_form"):
+                col1, col2 = st.columns(2)
+                with col1:
+                    new_username = st.text_input("Username*", placeholder="Choose a username")
+                    new_password = st.text_input("Password*", type="password", placeholder="Min 6 characters")
+                    new_full_name = st.text_input("Full Name", placeholder="John Doe")
+                
+                with col2:
+                    new_email = st.text_input("Email*", placeholder="john@example.com")
+                    new_password_confirm = st.text_input("Confirm Password*", type="password")
+                    new_organization = st.text_input("Organization", placeholder="University/Company")
+                
+                submit_signup = st.form_submit_button("🎯 Create Account", use_container_width=True, type="primary")
+                
+                if submit_signup:
+                    errors = []
+                    
+                    if not new_username or not new_email or not new_password:
+                        errors.append("Please fill in all required fields")
+                    
+                    if not validate_email(new_email):
+                        errors.append("Please enter a valid email address")
+                    
+                    if len(new_password) < 6:
+                        errors.append("Password must be at least 6 characters")
+                    
+                    if new_password != new_password_confirm:
+                        errors.append("Passwords do not match")
+                    
+                    if errors:
+                        for error in errors:
+                            st.error(error)
+                    else:
+                        success, message = create_user(
+                            new_username, new_email, new_password, 
+                            new_full_name, new_organization
+                        )
+                        if success:
+                            st.success(message + " Please login to continue.")
+                            st.balloons()
+                        else:
+                            st.error(message)
+
 # --------------------------------------------------------------------
 # Built-in data sources (UNCHANGED)
 # --------------------------------------------------------------------
