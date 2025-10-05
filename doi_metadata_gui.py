@@ -1568,16 +1568,8 @@ hr {
 # MAIN ENTRY POINT WITH AUTHENTICATION (UNCHANGED)
 # --------------------------------------------------------------------
 def main():
-    """Main application entry point with authentication"""
-    init_database()
-    
-    if 'authenticated' not in st.session_state:
-        st.session_state.authenticated = False
-    
-    if not st.session_state.authenticated:
-        show_login_page()
-    else:
-        run_original_app()
+    """Main application entry point without login/signup"""
+    run_original_app()
 
 if __name__ == "__main__":
     main()
