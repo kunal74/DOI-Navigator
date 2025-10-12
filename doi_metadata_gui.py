@@ -1,1348 +1,647 @@
-# doi_metadata_gui_adaptive.py
-# DOI Navigator with Authentication System - Adaptive Light/Dark Theme
-# Enhanced to work with both light and dark Windows themes
+# doi_metadata_gui.py
+# Streamlit DOI Navigator – clean build with About toggle, theme toggle, and footer email
+# ---------------------------------------------------------------
+# Dependencies:
+#   pip install streamlit requests pandas openpyxl xlsxwriter
+#
+# Run:
+#   streamlit run doi_metadata_gui.py
+# ---------------------------------------------------------------
+
+from __future__ import annotations
 
 import io
-import difflib
+import json
+import math
 import re
+import time
 from dataclasses import dataclass
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import datetime
-import typing as t
+from typing import Dict, List, Optional, Tuple
 
 import pandas as pd
 import requests
-from requests.adapters import HTTPAdapter
-from urllib3.util.retry import Retry
 import streamlit as st
 
-# ----- Optional but fast fuzzy -----
-try:
-    from rapidfuzz import fuzz, process  # type: ignore
-    _USE_RAPIDFUZZ = True
-except Exception:
-    _USE_RAPIDFUZZ = False
+# ===============================
+# ---------- STYLES -------------
+# ===============================
 
-# --------------------------------------------------------------------
-# Built-in data sources (UNCHANGED)
-# --------------------------------------------------------------------
-JCR_FALLBACK_URL = (
-    "https://www.dropbox.com/scl/fi/z1xdk4pbpko4p2x0brgq7/AllJournalsJCR2025.xlsx"
-    "?rlkey=3kxhjziorfbo2xwf4p177ukin&st=0bu01tph&dl=1"
-)
-SCOPUS_FALLBACK_URL = (
-    "https://www.dropbox.com/scl/fi/1uv8s3207pojp4tzzt8f4/ext_list_Aug_2025.xlsx"
-    "?rlkey=kyieyvc0b08vgo0asxhe0j061&st=ooszzvmx&dl=1"
-)
+# Base CSS (dark/light via CSS vars). We keep the same look across the app.
+st.set_page_config(page_title="DOI Navigator", page_icon="🔍", layout="wide")
 
-def run_original_app():
-    """Main app with adaptive theme support"""
-    
-    # --------------------------------------------------------------------
-    # Page & Styles - ADAPTIVE THEME
-    # --------------------------------------------------------------------
-    st.set_page_config(page_title="DOI Navigator", layout="wide", page_icon="🔍", initial_sidebar_state="expanded")
-
-    # Enhanced CSS with adaptive light/dark theme support
-    st.markdown("""
+BASE_CSS = """
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700;800;900&display=swap');
-
-/* CSS Variables for Adaptive Theme */
 :root {
-    /* Light theme default */
-    --primary-bg: #ffffff;
-    --secondary-bg: #f8f9fa;
-    --tertiary-bg: #e9ecef;
-    --card-bg: rgba(255, 255, 255, 0.95);
-    --card-bg-alt: rgba(248, 249, 250, 0.95);
-    --text-primary: #212529;
-    --text-secondary: #6c757d;
-    --text-muted: #868e96;
-    --border-color: rgba(0, 0, 0, 0.125);
-    --border-light: rgba(0, 0, 0, 0.06);
-    --shadow-light: rgba(0, 0, 0, 0.08);
-    --shadow-medium: rgba(0, 0, 0, 0.12);
-    --shadow-heavy: rgba(0, 0, 0, 0.16);
-    --input-bg: rgba(255, 255, 255, 0.9);
-    --input-border: rgba(94, 114, 228, 0.25);
-    --sidebar-bg: rgba(248, 249, 250, 0.95);
-    --gradient-bg: linear-gradient(135deg, #ffffff 0%, #f8f9fa 50%, #e9ecef 100%);
-}
-
-/* Dark theme overrides */
-@media (prefers-color-scheme: dark) {
-    :root {
-        --primary-bg: #1a1a2e;
-        --secondary-bg: #16213e;
-        --tertiary-bg: #0f3460;
-        --card-bg: rgba(15, 23, 42, 0.95);
-        --card-bg-alt: rgba(22, 33, 62, 0.95);
-        --text-primary: #e2e8f0;
-        --text-secondary: #94a3b8;
-        --text-muted: #64748b;
-        --border-color: rgba(255, 255, 255, 0.1);
-        --border-light: rgba(255, 255, 255, 0.05);
-        --shadow-light: rgba(0, 0, 0, 0.2);
-        --shadow-medium: rgba(0, 0, 0, 0.3);
-        --shadow-heavy: rgba(0, 0, 0, 0.4);
-        --input-bg: rgba(15, 23, 42, 0.8);
-        --input-border: rgba(94, 114, 228, 0.4);
-        --sidebar-bg: rgba(15, 23, 42, 0.95);
-        --gradient-bg: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
-    }
-}
-
-/* Global Styles */
-.stApp {
-    background: var(--gradient-bg);
-    font-family: 'Poppins', sans-serif;
-    color: var(--text-primary);
-}
-
-/* Animated Background - Subtle */
-.stApp::before {
-    content: '';
-    position: fixed;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    background-image: 
-        radial-gradient(circle at 20% 80%, rgba(233, 69, 96, 0.03) 0%, transparent 50%),
-        radial-gradient(circle at 80% 20%, rgba(52, 211, 153, 0.03) 0%, transparent 50%),
-        radial-gradient(circle at 40% 40%, rgba(94, 114, 228, 0.03) 0%, transparent 50%);
-    animation: gradientShift 25s ease infinite;
-    pointer-events: none;
-    z-index: -1;
-}
-
-@keyframes gradientShift {
-    0%, 100% { transform: translate(0, 0) rotate(0deg); }
-    33% { transform: translate(-15px, -15px) rotate(120deg); }
-    66% { transform: translate(15px, -10px) rotate(240deg); }
-}
-
-/* Bouncing Balls Animation - Adaptive colors */
-.bouncing-balls {
-    position: absolute;
-    width: 100%;
-    height: 100px;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%);
-    pointer-events: none;
-    z-index: 1;
-}
-
-.ball {
-    position: absolute;
-    width: 20px;
-    height: 20px;
-    border-radius: 50%;
-    animation: bounce 2s infinite ease-in-out;
-}
-
-.ball:nth-child(1) {
-    left: 20%;
-    background: linear-gradient(135deg, #e94560, #ff6b6b);
-    animation-delay: 0s;
-    box-shadow: 0 0 20px rgba(233, 69, 96, 0.4);
-}
-
-.ball:nth-child(2) {
-    left: 35%;
-    background: linear-gradient(135deg, #34d399, #10b981);
-    animation-delay: 0.2s;
-    box-shadow: 0 0 20px rgba(52, 211, 153, 0.4);
-}
-
-.ball:nth-child(3) {
-    left: 50%;
-    background: linear-gradient(135deg, #5e72e4, #667eea);
-    animation-delay: 0.4s;
-    box-shadow: 0 0 20px rgba(94, 114, 228, 0.4);
-}
-
-.ball:nth-child(4) {
-    left: 65%;
-    background: linear-gradient(135deg, #f59e0b, #fbbf24);
-    animation-delay: 0.6s;
-    box-shadow: 0 0 20px rgba(245, 158, 11, 0.4);
-}
-
-.ball:nth-child(5) {
-    left: 80%;
-    background: linear-gradient(135deg, #8b5cf6, #a78bfa);
-    animation-delay: 0.8s;
-    box-shadow: 0 0 20px rgba(139, 92, 246, 0.4);
-}
-
-@keyframes bounce {
-    0%, 100% {
-        transform: translateY(0) scale(1);
-    }
-    50% {
-        transform: translateY(-30px) scale(1.1);
-    }
-}
-
-/* Header Styles - Adaptive */
-.hero-section {
-    background: var(--card-bg);
-    border: 1px solid var(--border-light);
-    border-radius: 24px;
-    padding: 40px;
-    margin: -20px -50px 30px -50px;
-    backdrop-filter: blur(20px);
-    box-shadow: 
-        0 10px 40px var(--shadow-light),
-        inset 0 1px 0 var(--border-light);
-    animation: slideDown 0.6s ease-out;
-    position: relative;
-    overflow: hidden;  /* Changed from visible to hidden */
-    min-height: 200px;  /* Added minimum height */
-}
-
-/* Particle Canvas */
-#particleCanvas {
-    position: absolute;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    pointer-events: none;
-    opacity: 0.6;
-}
-
-@keyframes slideDown {
-    from { opacity: 0; transform: translateY(-30px); }
-    to { opacity: 1; transform: translateY(0); }
-}
-/* Geometric Background Pattern */
-.geometric-bg {
-    position: absolute;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    overflow: hidden;
-    opacity: 0.1;
-}
-
-.geo-shape {
-    position: absolute;
-    border: 2px solid;
-    border-radius: 30% 70% 70% 30% / 30% 30% 70% 70%;
-    animation: morphShape 15s ease-in-out infinite;
-}
-
-.geo-shape-1 {
-    width: 300px;
-    height: 300px;
-    top: -100px;
-    left: -100px;
-    border-color: #e94560;
-    animation-delay: 0s;
-}
-
-.geo-shape-2 {
-    width: 200px;
-    height: 200px;
-    top: 50%;
-    right: -50px;
-    border-color: #34d399;
-    animation-delay: 3s;
-}
-
-.geo-shape-3 {
-    width: 150px;
-    height: 150px;
-    bottom: -50px;
-    left: 20%;
-    border-color: #5e72e4;
-    animation-delay: 6s;
-}
-
-.geo-shape-4 {
-    width: 250px;
-    height: 250px;
-    top: 20%;
-    left: 40%;
-    border-color: #f59e0b;
-    animation-delay: 9s;
-}
-
-.geo-shape-5 {
-    width: 180px;
-    height: 180px;
-    bottom: 10%;
-    right: 20%;
-    border-color: #8b5cf6;
-    animation-delay: 12s;
-}
-
-.geo-shape-6 {
-    width: 220px;
-    height: 220px;
-    top: -50px;
-    right: 30%;
-    border-color: #10b981;
-    animation-delay: 15s;
-}
-
-@keyframes morphShape {
-    0%, 100% {
-        border-radius: 30% 70% 70% 30% / 30% 30% 70% 70%;
-        transform: rotate(0deg) scale(1);
-    }
-    25% {
-        border-radius: 70% 30% 30% 70% / 70% 70% 30% 30%;
-        transform: rotate(90deg) scale(1.1);
-    }
-    50% {
-        border-radius: 30% 70% 70% 30% / 70% 30% 30% 70%;
-        transform: rotate(180deg) scale(0.9);
-    }
-    75% {
-        border-radius: 70% 30% 30% 70% / 30% 70% 70% 30%;
-        transform: rotate(270deg) scale(1.05);
-    }
-}
-
-/* Floating Dots Animation */
-.floating-dots {
-    position: absolute;
-    width: 100%;
-    height: 100%;
-    overflow: hidden;
-}
-
-.floating-dots span {
-    position: absolute;
-    display: block;
-    width: 20px;
-    height: 20px;
-    background: linear-gradient(135deg, #5e72e4, #e94560);
-    border-radius: 50%;
-    opacity: 0.1;
-    animation: floatUp 15s linear infinite;
-}
-
-.floating-dots span:nth-child(1) { left: 5%; animation-delay: 0s; width: 15px; height: 15px; }
-.floating-dots span:nth-child(2) { left: 15%; animation-delay: 1s; width: 12px; height: 12px; }
-.floating-dots span:nth-child(3) { left: 25%; animation-delay: 2s; width: 18px; height: 18px; }
-.floating-dots span:nth-child(4) { left: 35%; animation-delay: 3s; width: 10px; height: 10px; }
-.floating-dots span:nth-child(5) { left: 45%; animation-delay: 4s; width: 22px; height: 22px; }
-.floating-dots span:nth-child(6) { left: 55%; animation-delay: 5s; width: 14px; height: 14px; }
-.floating-dots span:nth-child(7) { left: 65%; animation-delay: 6s; width: 16px; height: 16px; }
-.floating-dots span:nth-child(8) { left: 75%; animation-delay: 7s; width: 20px; height: 20px; }
-.floating-dots span:nth-child(9) { left: 85%; animation-delay: 8s; width: 11px; height: 11px; }
-.floating-dots span:nth-child(10) { left: 95%; animation-delay: 9s; width: 25px; height: 25px; }
-.floating-dots span:nth-child(11) { left: 10%; animation-delay: 10s; width: 13px; height: 13px; }
-.floating-dots span:nth-child(12) { left: 30%; animation-delay: 11s; width: 17px; height: 17px; }
-.floating-dots span:nth-child(13) { left: 50%; animation-delay: 12s; width: 19px; height: 19px; }
-.floating-dots span:nth-child(14) { left: 70%; animation-delay: 13s; width: 15px; height: 15px; }
-.floating-dots span:nth-child(15) { left: 90%; animation-delay: 14s; width: 21px; height: 21px; }
-
-@keyframes floatUp {
-    0% {
-        bottom: -100px;
-        transform: translateX(0);
-    }
-    25% {
-        transform: translateX(-30px);
-    }
-    50% {
-        transform: translateX(30px);
-    }
-    75% {
-        transform: translateX(-15px);
-    }
-    100% {
-        bottom: calc(100% + 100px);
-        transform: translateX(0);
-    }
-}
-
-.main-title {
-    font-size: 56px;
-    font-weight: 800;
-    background: linear-gradient(135deg, #e94560 0%, #34d399 25%, #5e72e4 50%, #f59e0b 75%, #8b5cf6 100%);
-    background-size: 400% 400%;
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    background-clip: text;
-    letter-spacing: -1px;
-    margin: 0;
-    animation: gradientFlow 10s ease infinite;
-    text-align: center;
-    position: relative;
-    z-index: 2;
-}
-
-@keyframes gradientFlow {
-    0%, 100% { background-position: 0% 50%; }
-    50% { background-position: 100% 50%; }
-}
-
-.subtitle {
-    color: var(--text-secondary);
-    font-size: 18px;
-    font-weight: 400;
-    text-align: center;
-    margin-top: 10px;
-    opacity: 0;
-    animation: fadeInUp 0.8s ease-out 0.3s forwards;
-}
-
-@keyframes fadeInUp {
-    to { opacity: 1; transform: translateY(0); }
-    from { opacity: 0; transform: translateY(10px); }
-}
-
-/* Input Styles - Adaptive */
-.stTextArea textarea, .stTextInput input {
-    background: var(--input-bg) !important;
-    border: 2px solid var(--input-border) !important;
-    border-radius: 12px !important;
-    color: var(--text-primary) !important;
-    font-size: 15px !important;
-    padding: 12px 16px !important;
-    transition: all 0.3s ease !important;
-    backdrop-filter: blur(10px) !important;
-}
-
-.stTextArea textarea::placeholder, .stTextInput input::placeholder {
-    color: var(--text-secondary) !important;
-    opacity: 0.7 !important;
-}
-
-.stTextArea textarea:focus, .stTextInput input:focus {
-    border-color: rgba(94, 114, 228, 0.6) !important;
-    box-shadow: 0 0 0 3px rgba(94, 114, 228, 0.1) !important;
-    background: var(--input-bg) !important;
-}
-
-/* Button Styles */
-.stButton > button {
-    background: linear-gradient(135deg, #5e72e4 0%, #667eea 100%);
-    color: white;
-    border: none;
-    border-radius: 12px;
-    padding: 12px 32px;
-    font-weight: 600;
-    font-size: 16px;
-    transition: all 0.3s ease;
-    box-shadow: 0 4px 15px rgba(94, 114, 228, 0.3);
-    position: relative;
-    overflow: hidden;
-}
-
-.stButton > button:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 6px 20px rgba(94, 114, 228, 0.4);
-}
-
-/* Primary Button */
-[data-testid="stButton"] button[kind="primary"] {
-    background: linear-gradient(135deg, #e94560 0%, #ff6b6b 100%);
-    box-shadow: 0 4px 15px rgba(233, 69, 96, 0.3);
-}
-
-/* Download Button */
-.stDownloadButton > button {
-    background: linear-gradient(135deg, #34d399 0%, #10b981 100%);
-    color: white;
-    border: none;
-    border-radius: 12px;
-    padding: 12px 32px;
-    font-weight: 600;
-    transition: all 0.3s ease;
-    box-shadow: 0 4px 15px rgba(52, 211, 153, 0.3);
-}
-
-.stDownloadButton > button:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 6px 20px rgba(52, 211, 153, 0.4);
-}
-
-/* Slider Styles */
-.stSlider > div > div > div > div {
-    background: linear-gradient(90deg, #5e72e4, #e94560) !important;
-}
-
-.stSlider > div > div > div[role="slider"] {
-    background: var(--card-bg) !important;
-    border: 2px solid var(--border-color) !important;
-    box-shadow: 0 2px 10px var(--shadow-medium) !important;
-}
-
-/* Checkbox Styles */
-.stCheckbox label {
-    color: var(--text-primary) !important;
-    font-weight: 500;
-}
-
-/* DataFrame Container */
-.dataframe-container {
-    background: var(--card-bg);
-    border: 1px solid var(--border-color);
-    border-radius: 16px;
-    padding: 20px;
-    backdrop-filter: blur(10px);
-    box-shadow: 0 10px 40px var(--shadow-medium);
-    margin: 20px 0;
-    animation: slideUp 0.6s ease-out;
-}
-
-@keyframes slideUp {
-    from { opacity: 0; transform: translateY(20px); }
-    to { opacity: 1; transform: translateY(0); }
-}
-
-/* Progress Bar */
-.stProgress > div > div > div {
-    background: linear-gradient(90deg, #5e72e4, #e94560, #34d399) !important;
-    background-size: 200% 100%;
-    animation: progressGradient 2s ease infinite;
-    border-radius: 10px;
-    height: 8px !important;
-}
-
-@keyframes progressGradient {
-    0% { background-position: 0% 50%; }
-    100% { background-position: 200% 50%; }
-}
-
-/* Sidebar Styles - Adaptive */
-.css-1d391kg, [data-testid="stSidebar"] {
-    background: var(--sidebar-bg) !important;
-    backdrop-filter: blur(20px);
-    border-right: 1px solid var(--border-color) !important;
-}
-
-.css-1d391kg .stMarkdown, [data-testid="stSidebar"] .stMarkdown {
-    color: var(--text-primary) !important;
-}
-
-/* Metrics Cards - Adaptive */
-.metric-card {
-    background: var(--card-bg-alt);
-    border: 1px solid var(--border-light);
-    border-radius: 16px;
-    padding: 20px;
-    text-align: center;
-    transition: all 0.3s ease;
-    box-shadow: 0 4px 12px var(--shadow-light);
-}
-
-.metric-card:hover {
-    transform: translateY(-5px);
-    box-shadow: 0 10px 30px var(--shadow-medium);
-}
-
-.metric-value {
-    font-size: 32px;
-    font-weight: 700;
-    background: linear-gradient(135deg, #5e72e4, #e94560);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    background-clip: text;
-}
-
-.metric-label {
-    color: var(--text-secondary);
-    font-size: 14px;
-    font-weight: 500;
-    margin-top: 8px;
-}
-
-/* Text Color Overrides for Consistency */
-.stMarkdown, .stText, p, h1, h2, h3, h4, h5, h6 {
-    color: var(--text-primary) !important;
-}
-
-.stCaption {
-    color: var(--text-secondary) !important;
-}
-
-/* Alert Styles */
-.stAlert {
-    background: var(--card-bg) !important;
-    border: 1px solid var(--border-color) !important;
-    border-radius: 12px !important;
-    color: var(--text-primary) !important;
-    backdrop-filter: blur(10px);
-}
-
-/* Footer */
-.footer-section {
-    margin-top: 60px;
-    padding: 30px;
-    background: var(--card-bg);
-    border-radius: 20px;
-    border: 1px solid var(--border-color);
-    text-align: center;
-    color: var(--text-secondary);
-}
-
-.footer-credit {
-    color: var(--text-secondary);
-    font-size: 14px;
-    font-weight: 400;
-}
-
-.footer-credit a {
-    color: #5e72e4;
-    text-decoration: none;
-    transition: color 0.3s ease;
-}
-
-.footer-credit a:hover {
-    color: #e94560;
-}
-
-/* Custom scrollbar - Adaptive */
-::-webkit-scrollbar {
-    width: 10px;
-    height: 10px;
-}
-
-::-webkit-scrollbar-track {
-    background: var(--card-bg);
-}
-
-::-webkit-scrollbar-thumb {
-    background: linear-gradient(135deg, #5e72e4, #e94560);
-    border-radius: 5px;
-}
-
-::-webkit-scrollbar-thumb:hover {
-    background: linear-gradient(135deg, #e94560, #5e72e4);
-}
-
-/* Tabs - Adaptive */
-.stTabs [data-baseweb="tab-list"] {
-    gap: 8px;
-    background: transparent;
-}
-
-.stTabs [data-baseweb="tab"] {
-    background-color: var(--card-bg) !important;
-    border: 1px solid var(--border-color) !important;
-    border-radius: 8px !important;
-    color: var(--text-primary) !important;
-}
-
-.stTabs [aria-selected="true"] {
-    background-color: var(--input-bg) !important;
-    border-color: #5e72e4 !important;
-    color: var(--text-primary) !important;
-}
-
-/* DataFrame styling */
-[data-testid="stDataFrame"], [data-testid="stTable"] {
-    background: var(--card-bg) !important;
-    color: var(--text-primary) !important;
-}
-
-/* Ensure all text elements use adaptive colors */
-.stSelectbox label, .stSlider label, .stTextArea label, .stTextInput label {
-    color: var(--text-primary) !important;
-}
-
-/* Info/Success/Warning Messages */
-.stInfo, .stSuccess, .stWarning, .stError {
-    background: var(--card-bg) !important;
-    border: 1px solid var(--border-color) !important;
-    color: var(--text-primary) !important;
-}
-
-.stSpinner > div {
-    border-color: #5e72e4 !important;
-}
-
-hr {
-    border: 0;
-    height: 1px;
-    background: var(--border-color);
-    margin: 20px 0;
-}
+  --primary-bg:#1a1a2e;
+  --secondary-bg:#16213e;
+  --tertiary-bg:#0f3460;
+  --card-bg:rgba(15,23,42,0.95);
+  --card-bg-alt:rgba(22,33,62,0.95);
+  --text-primary:#e2e8f0;
+  --text-secondary:#94a3b8;
+  --text-muted:#64748b;
+  --border-color:rgba(255,255,255,0.1);
+  --border-light:rgba(255,255,255,0.05);
+  --shadow-light:rgba(0,0,0,0.2);
+  --shadow-medium:rgba(0,0,0,0.3);
+  --shadow-heavy:rgba(0,0,0,0.4);
+  --input-bg:rgba(15,23,42,0.8);
+  --input-border:rgba(94,114,228,0.4);
+  --sidebar-bg:rgba(15,23,42,0.95);
+}
+@media (prefers-color-scheme: light){
+  :root {
+    --primary-bg:#ffffff;
+    --secondary-bg:#f8f9fa;
+    --tertiary-bg:#e9ecef;
+    --card-bg:rgba(255,255,255,0.95);
+    --card-bg-alt:rgba(248,249,250,0.95);
+    --text-primary:#212529;
+    --text-secondary:#6c757d;
+    --text-muted:#868e96;
+    --border-color:rgba(0,0,0,0.125);
+    --border-light:rgba(0,0,0,0.06);
+    --shadow-light:rgba(0,0,0,0.08);
+    --shadow-medium:rgba(0,0,0,0.12);
+    --shadow-heavy:rgba(0,0,0,0.18);
+    --input-bg:rgba(255,255,255,0.9);
+    --input-border:rgba(94,114,228,0.25);
+    --sidebar-bg:rgba(248,249,250,0.95);
+  }
+}
+
+html,body { background: var(--primary-bg); }
+.block-container { padding-top: 1.2rem; }
+
+.hero {
+  position: relative;
+  background: var(--card-bg);
+  border: 1px solid var(--border-light);
+  border-radius: 24px;
+  padding: 40px 24px;
+  margin-bottom: 20px;
+  backdrop-filter: blur(18px);
+  box-shadow: 0 10px 40px var(--shadow-light), inset 0 1px 0 var(--border-light);
+  overflow: hidden;
+}
+
+.hero h1 {
+  margin: 0;
+  font-weight: 900;
+  font-size: 56px;
+  background: linear-gradient(135deg,#e94560 0%,#34d399 25%,#5e72e4 50%,#f59e0b 75%,#8b5cf6 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  letter-spacing: -1px;
+}
+.hero .sub {
+  color: var(--text-secondary);
+  margin-top: 6px;
+}
+
+.card {
+  background: var(--card-bg);
+  border: 1px solid var(--border-color);
+  border-radius: 16px;
+  box-shadow: 0 10px 40px var(--shadow-medium);
+  padding: 0;
+  margin-bottom: 18px;
+}
+.card h3 {
+  margin: 0;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--border-color);
+}
+.card .body { padding: 16px 18px; }
+
+.sidebar {
+  background: var(--sidebar-bg);
+  border: 1px solid var(--border-color);
+  border-radius: 16px;
+  padding: 16px 18px;
+}
+
+input[type="text"], textarea {
+  width: 100%;
+  background: var(--input-bg);
+  border: 2px solid var(--input-border);
+  border-radius: 12px;
+  color: var(--text-primary);
+  font-size: 15px;
+  padding: 10px 12px;
+}
+textarea::placeholder, input::placeholder { color: var(--text-secondary); opacity: .8; }
+
+button, .btn {
+  background: linear-gradient(135deg,#5e72e4 0%,#667eea 100%);
+  color: #fff;
+  border: none;
+  border-radius: 12px;
+  padding: 6px 12px;     /* very thin buttons as requested */
+  font-weight: 700;
+  font-size: 13px;
+  line-height: 1.1;
+  box-shadow: 0 4px 15px rgba(94,114,228,.3);
+}
+.btn.primary {
+  background: linear-gradient(135deg,#e94560 0%,#ff6b6b 100%);
+}
+.btn.download {
+  background: linear-gradient(135deg,#34d399 0%,#10b981 100%);
+}
+
+.kpi {
+  text-align:center;
+  background: var(--card-bg-alt);
+  border: 1px solid var(--border-light);
+  border-radius: 16px;
+  padding: 16px;
+  margin: 0;
+}
+.kpi .v {
+  font-size: 28px;
+  font-weight: 800;
+  background: linear-gradient(135deg,#5e72e4,#e94560);
+  -webkit-background-clip:text;
+  -webkit-text-fill-color:transparent;
+}
+.kpi .l { font-size: 13px; color: var(--text-secondary); margin-top: 6px; }
+
+.table-note {
+  font-size: 12px; color: var(--text-secondary);
+  padding-top: 6px;
+}
+
+.progress { height: 8px; width: 100%; border-radius: 10px; background: var(--card-bg);
+  border:1px solid var(--border-color); overflow: hidden; }
+.progress > div { height: 100%; width: 0%; background: linear-gradient(90deg,#5e72e4,#e94560,#34d399);
+  background-size: 200% 100%; animation: pg 2s ease infinite; }
+@keyframes pg { 0%{background-position:0% 50%} 100%{background-position:200% 50%} }
+
+.top-right {
+  position: fixed; top: 10px; right: 14px; z-index: 9999;
+  display: flex; gap: 8px; align-items: center;
+}
+.top-right a {
+  border: 1px solid var(--border-color); padding: 8px 12px; border-radius: 999px;
+  background: var(--card-bg); text-decoration: none; color: var(--text-primary); font-weight: 800;
+}
+
+.footer {
+  margin-top: 14px;
+  padding: 18px;
+  text-align: center;
+  color: var(--text-secondary);
+  background: var(--card-bg);
+  border: 1px solid var(--border-color);
+  border-radius: 16px;
+}
+.footer a { color: inherit; text-decoration: none; }
+.footer a:hover { color: #e2e8f0; text-decoration: underline; }
 </style>
-""", unsafe_allow_html=True)
+"""
+st.markdown(BASE_CSS, unsafe_allow_html=True)
 
-  # Hero Section with Enhanced Background Animation
-    st.markdown("""
-<div class="hero-section">
-    <div class="geometric-bg">
-        <div class="geo-shape geo-shape-1"></div>
-        <div class="geo-shape geo-shape-2"></div>
-        <div class="geo-shape geo-shape-3"></div>
-        <div class="geo-shape geo-shape-4"></div>
-        <div class="geo-shape geo-shape-5"></div>
-        <div class="geo-shape geo-shape-6"></div>
-    </div>
-    <div class="floating-dots">
-        <span></span><span></span><span></span><span></span><span></span>
-        <span></span><span></span><span></span><span></span><span></span>
-        <span></span><span></span><span></span><span></span><span></span>
-    </div>
-    <div class="bouncing-balls">
-        <div class="ball"></div>
-        <div class="ball"></div>
-        <div class="ball"></div>
-        <div class="ball"></div>
-        <div class="ball"></div>
-    </div>
-    <h1 class="main-title">🔍 DOI Navigator</h1>
-    <p class="subtitle">Advanced Research Paper Metadata Extraction & Analysis</p>
-</div>
-""", unsafe_allow_html=True)
-    
-    # Session / networking (UNCHANGED from original)
-
-# --- Top-right actions (About + Theme) using query params (quote-safe) ---
+# =====================================================
+# --------- ABOUT / THEME TOGGLE (TOP RIGHT) ----------
+# =====================================================
 if "show_about" not in st.session_state:
     st.session_state.show_about = False
 if "theme_mode" not in st.session_state:
-    st.session_state.theme_mode = "auto"  # auto/light/dark
+    st.session_state.theme_mode = "auto"  # auto / dark / light
 
 params = st.query_params
 if "about" in params:
     st.session_state.show_about = not st.session_state.show_about
     st.query_params.clear()
 if "theme" in params:
-    order = {"auto": "dark", "dark": "light", "light": "auto"}
-    st.session_state.theme_mode = order.get(st.session_state.theme_mode, "auto")
+    cycle = {"auto": "dark", "dark": "light", "light": "auto"}
+    st.session_state.theme_mode = cycle.get(st.session_state.theme_mode, "auto")
     st.query_params.clear()
 
-# Inject CSS overrides if user picked a specific theme
+# If user explicitly picked light/dark, override CSS vars
 if st.session_state.theme_mode in ("light", "dark"):
     if st.session_state.theme_mode == "light":
         st.markdown(
             """
             <style>
             :root {
-                --primary-bg:#ffffff; --secondary-bg:#f8f9fa; --tertiary-bg:#e9ecef;
-                --card-bg:rgba(255,255,255,0.95); --card-bg-alt:rgba(248,249,250,0.95);
-                --text-primary:#212529; --text-secondary:#6c757d; --text-muted:#868e96;
-                --border-color:rgba(0,0,0,0.125); --border-light:rgba(0,0,0,0.06);
-                --shadow-light:rgba(0,0,0,0.08); --shadow-medium:rgba(0,0,0,0.12);
-                --input-bg:rgba(255,255,255,0.9); --input-border:rgba(94,114,228,0.25);
-                --sidebar-bg:rgba(248,249,250,0.95);
+              --primary-bg:#ffffff; --secondary-bg:#f8f9fa; --tertiary-bg:#e9ecef;
+              --card-bg:rgba(255,255,255,0.95); --card-bg-alt:rgba(248,249,250,0.95);
+              --text-primary:#212529; --text-secondary:#6c757d; --text-muted:#868e96;
+              --border-color:rgba(0,0,0,0.125); --border-light:rgba(0,0,0,0.06);
+              --shadow-light:rgba(0,0,0,0.08); --shadow-medium:rgba(0,0,0,0.12);
+              --input-bg:rgba(255,255,255,0.9); --input-border:rgba(94,114,228,0.25);
+              --sidebar-bg:rgba(248,249,250,0.95);
             }
             </style>
             """,
-            unsafe_allow_html=True
+            unsafe_allow_html=True,
         )
     else:
         st.markdown(
             """
             <style>
             :root {
-                --primary-bg:#1a1a2e; --secondary-bg:#16213e; --tertiary-bg:#0f3460;
-                --card-bg:rgba(15,23,42,0.95); --card-bg-alt:rgba(22,33,62,0.95);
-                --text-primary:#e2e8f0; --text-secondary:#94a3b8; --text-muted:#64748b;
-                --border-color:rgba(255,255,255,0.1); --border-light:rgba(255,255,255,0.05);
-                --shadow-light:rgba(0,0,0,0.2); --shadow-medium:rgba(0,0,0,0.3);
-                --input-bg:rgba(15,23,42,0.8); --input-border:rgba(94,114,228,0.4);
-                --sidebar-bg:rgba(15,23,42,0.95);
+              --primary-bg:#1a1a2e; --secondary-bg:#16213e; --tertiary-bg:#0f3460;
+              --card-bg:rgba(15,23,42,0.95); --card-bg-alt:rgba(22,33,62,0.95);
+              --text-primary:#e2e8f0; --text-secondary:#94a3b8; --text-muted:#64748b;
+              --border-color:rgba(255,255,255,0.1); --border-light:rgba(255,255,255,0.05);
+              --shadow-light:rgba(0,0,0,0.2); --shadow-medium:rgba(0,0,0,0.3);
+              --input-bg:rgba(15,23,42,0.8); --input-border:rgba(94,114,228,0.4);
+              --sidebar-bg:rgba(15,23,42,0.95);
             }
             </style>
             """,
-            unsafe_allow_html=True
+            unsafe_allow_html=True,
         )
 
-_icon = "🌞" if st.session_state.theme_mode == "dark" else "🌙"
+icon = "🌞" if st.session_state.theme_mode == "dark" else "🌙"
 st.markdown(
     f"""
-    <div style="position:fixed;top:10px;right:14px;z-index:9999;display:flex;gap:8px;align-items:center">
-      <a href="?about=1" style="border:1px solid var(--border-color);padding:8px 12px;border-radius:999px;background:var(--card-bg);text-decoration:none;color:var(--text-primary);font-weight:700">About</a>
-      <a href="?theme=1" title="Theme: {st.session_state.theme_mode}" style="border:1px solid var(--border-color);padding:8px 12px;border-radius:999px;background:var(--card-bg);text-decoration:none;color:var(--text-primary);font-weight:700">{_icon}</a>
+    <div class="top-right">
+      <a href="?about=1">About</a>
+      <a href="?theme=1" title="Theme: {st.session_state.theme_mode}">{icon}</a>
     </div>
     """,
-    unsafe_allow_html=True
+    unsafe_allow_html=True,
 )
 
-    def _get_session() -> requests.Session:
-        s = requests.Session()
-        retries = Retry(
-            total=4,
-            backoff_factor=0.5,
-            status_forcelist=[429, 500, 502, 503, 504],
-            allowed_methods=frozenset(["GET"]),
-        )
-        adapter = HTTPAdapter(max_retries=retries, pool_connections=64, pool_maxsize=64)
-        s.mount("https://", adapter)
-        s.mount("http://", adapter)
-        s.headers.update({"User-Agent": "DOI-Navigator/1.1 (mailto:your.email@domain)"})
-        return s
+# ===============================
+# ----------- HERO --------------
+# ===============================
+st.markdown(
+    """
+    <section class="hero">
+      <h1>🔍 DOI Navigator</h1>
+      <div class="sub">Advanced Research Paper Metadata Extraction & Analysis</div>
+    </section>
+    """,
+    unsafe_allow_html=True,
+)
 
-    def _download_excel(url: str) -> io.BytesIO:
-        r = _get_session().get(url, timeout=60)
-        r.raise_for_status()
-        return io.BytesIO(r.content)
+# ===============================
+# --------- SIDEBAR -------------
+# ===============================
+with st.sidebar:
+    st.markdown('<div class="sidebar">', unsafe_allow_html=True)
+    st.header("⚙️ Configuration")
 
-    # DOI normalization
-    def normalize_doi_input(s: str) -> str:
-        s = s.strip()
-        low = s.lower()
-        for prefix in ("https://doi.org/", "http://doi.org/", "doi:", "doi "):
-            if low.startswith(prefix):
-                s = s[len(prefix):]
-                break
-        return s.strip()
+    st.subheader("Matching")
+    min_score = st.slider("🎯 Fuzzy Match Threshold", 60, 95, 80, help="80 = balanced accuracy")
+    wos_if_jcr = st.checkbox("📊 Auto-mark WoS if found in JCR", value=True)
+    scopus_exact_first = st.checkbox("🔍 Scopus exact match first", value=True)
 
-    # Matching config & helpers
-    @dataclass
-    class MatchCfg:
-        min_score: int = 80
-        wos_if_missing: bool = True
-        scopus_exact_first: bool = True
+    st.markdown("---")
+    st.subheader("Performance")
+    workers = st.slider("⚡ Parallel requests (hint)", 2, 16, 12)
 
-    def normalize_journal(s: str) -> str:
-        if not isinstance(s, str):
-            return ""
-        s = s.lower().replace("&", "and")
-        for ch in [",", ".", ":", ";", "(", ")", "[", "]"]:
-            s = s.replace(ch, " ")
-        return " ".join(s.split())
+    st.markdown("---")
+    st.subheader("📥 Load Databases (optional)")
+    jcr_file = st.file_uploader("Load JCR Excel (local)", type=["xlsx", "xls"])
+    scopus_file = st.file_uploader("Load Scopus Excel (local)", type=["xlsx", "xls"])
 
-    # Readers
-    def read_jcr(io_obj) -> pd.DataFrame:
-        xls = pd.ExcelFile(io_obj, engine="openpyxl")
-        df = pd.read_excel(xls, xls.sheet_names[0])
-        if df.shape[1] < 17:
-            raise ValueError("JCR file has fewer than 17 columns; cannot map B/M/Q reliably.")
-        journal_col = df.columns[1]
-        impact_col = df.columns[12]
-        quartile_col = df.columns[16]
-        out = df[[journal_col, impact_col, quartile_col]].copy()
-        out.columns = ["Journal", "Impact Factor", "Quartile"]
-        out["__norm"] = out["Journal"].map(normalize_journal)
-        return out
+    st.markdown("</div>", unsafe_allow_html=True)
 
-    _SCOPUS_TITLE_LIKELY = {
+# ===============================
+# --------- HELPERS -------------
+# ===============================
+
+def normalize_journal(name: str) -> str:
+    if not name:
+        return ""
+    s = str(name)
+    s = s.lower()
+    s = s.replace("&", "and")
+    s = re.sub(r"[.,:;()\\[\\]]", " ", s)
+    s = re.sub(r"\\s+", " ", s).strip()
+    return s
+
+def format_authors_crossref(auth: Optional[List[Dict]]) -> str:
+    if not auth:
+        return ""
+    parts = []
+    for a in auth:
+        given = (a.get("given") or "").strip()
+        family = (a.get("family") or "").strip()
+        initials = " ".join(w[0].upper() + "." for w in re.split(r"[\\s-]+", given) if w)
+        s = f"{family}, {initials}".strip().rstrip(",")
+        if s:
+            parts.append(s)
+    if len(parts) == 1:
+        return parts[0]
+    if len(parts) == 2:
+        return " & ".join(parts)
+    return ", ".join(parts[:-1]) + ", & " + parts[-1]
+
+def extract_fields_from_crossref(obj: Dict) -> Dict:
+    title = (obj.get("title") or [""])[0] if isinstance(obj.get("title"), list) else obj.get("title") or ""
+    journal = (obj.get("container-title") or [""])[0] if isinstance(obj.get("container-title"), list) else obj.get("container-title") or ""
+    publisher = obj.get("publisher") or obj.get("publisher-name") or ""
+    # year
+    year = None
+    for key in ("published-print", "issued", "published-online"):
+        dp = obj.get(key, {}).get("date-parts")
+        if isinstance(dp, list) and dp and isinstance(dp[0], list) and dp[0]:
+            year = dp[0][0]
+            break
+    if not year:
+        dt = obj.get("created", {}).get("date-time") or ""
+        m = re.match(r"^(\\d{4})", str(dt))
+        if m:
+            year = int(m.group(1))
+    cites = obj.get("is-referenced-by-count")
+    return {
+        "Title": title or "",
+        "Authors": format_authors_crossref(obj.get("author")),
+        "Journal": journal or "",
+        "Publisher": publisher,
+        "Year": year,
+        "Citations (Crossref)": cites if cites is not None else "",
+    }
+
+def fetch_crossref(doi: str) -> Dict:
+    url = f"https://api.crossref.org/works/{requests.utils.quote(doi)}"
+    r = requests.get(url, headers={"Accept": "application/json"}, timeout=20)
+    r.raise_for_status()
+    j = r.json()
+    return j.get("message", {})
+
+def fetch_csl(doi: str) -> Dict:
+    url = f"https://doi.org/{requests.utils.quote(doi)}"
+    r = requests.get(url, headers={"Accept": "application/vnd.citationstyles.csl+json"}, timeout=20)
+    r.raise_for_status()
+    return r.json()
+
+def parse_uploaded_jcr(file) -> pd.DataFrame:
+    """Expect columns like: [.., Journal, .., IF, .., Quartile ..] (we use positions 1,12,16 as a robust default)."""
+    xls = pd.ExcelFile(file, engine="openpyxl")
+    df = pd.read_excel(xls, xls.sheet_names[0])
+    if df.shape[1] < 3:
+        return pd.DataFrame(columns=["Journal", "Impact Factor", "Quartile", "__norm"])
+    journal_col = df.columns[1]
+    impact_col = df.columns[12] if len(df.columns) > 12 else df.columns[-1]
+    quartile_col = df.columns[16] if len(df.columns) > 16 else df.columns[-1]
+    out = df[[journal_col, impact_col, quartile_col]].copy()
+    out.columns = ["Journal", "Impact Factor", "Quartile"]
+    out["__norm"] = out["Journal"].map(normalize_journal)
+    return out
+
+def _pick_scopus_title_col(df: pd.DataFrame) -> str:
+    candidates = {c.lower().strip(): c for c in df.columns}
+    likely = {
         "source title", "title", "journal", "publication title", "full title",
         "journal title", "journal name", "scopus title", "scopus source title",
     }
-    def _pick_scopus_title_col(df: pd.DataFrame) -> str:
-        cols = {c.lower().strip(): c for c in df.columns}
-        for key in _SCOPUS_TITLE_LIKELY:
-            if key in cols:
-                return cols[key]
-        for c in df.columns:
-            if pd.api.types.is_object_dtype(df[c]):
-                return c
-        return df.columns[0]
+    for k in likely:
+        if k in candidates:
+            return candidates[k]
+    # fallback: first object dtype
+    for c in df.columns:
+        if pd.api.types.is_object_dtype(df[c]):
+            return c
+    return df.columns[0]
 
-    def read_scopus_titles(io_obj) -> pd.DataFrame:
-        xls = pd.ExcelFile(io_obj, engine="openpyxl")
-        df = pd.read_excel(xls, xls.sheet_names[0])
-        title_col = _pick_scopus_title_col(df)
-        out = df[[title_col]].copy()
-        out.columns = ["Scopus Title"]
-        out["__norm"] = out["Scopus Title"].map(normalize_journal)
-        return out
+def parse_uploaded_scopus(file) -> pd.DataFrame:
+    xls = pd.ExcelFile(file, engine="openpyxl")
+    df = pd.read_excel(xls, xls.sheet_names[0])
+    title_col = _pick_scopus_title_col(df)
+    out = df[[title_col]].copy()
+    out.columns = ["Scopus Title"]
+    out["__norm"] = out["Scopus Title"].map(normalize_journal)
+    return out
 
-    # Cache heavy loads
-    @st.cache_data(show_spinner=True, ttl=60*60*12)
-    def load_jcr_cached(url: str) -> pd.DataFrame:
-        return read_jcr(_download_excel(url))
+def quick_score(a: str, b: str) -> int:
+    """Jaccard over tokens (fast, stable)."""
+    A, B = set(a.split()), set(b.split())
+    if not A or not B:
+        return 0
+    inter = len(A & B)
+    union = len(A | B)
+    return int(round(100 * inter / union))
 
-    @st.cache_data(show_spinner=True, ttl=60*60*12)
-    def load_scopus_cached(url: str) -> pd.DataFrame:
-        return read_scopus_titles(_download_excel(url))
+# ===============================
+# ----------- LAYOUT ------------
+# ===============================
 
-    # Metadata fetchers
-    def _crossref_fetch_raw(doi: str, timeout: float = 15.0) -> dict:
-        url = f"https://api.crossref.org/works/{doi}"
-        r = _get_session().get(url, timeout=timeout)
-        r.raise_for_status()
-        return r.json().get("message", {})
+left, right = st.columns([1.0, 2.2])
 
-    def _doi_content_negotiation(doi: str, timeout: float = 15.0) -> dict:
-        url = f"https://doi.org/{doi}"
-        headers = {"Accept": "application/vnd.citationstyles.csl+json"}
-        r = _get_session().get(url, headers=headers, timeout=timeout, allow_redirects=True)
-        r.raise_for_status()
-        return r.json()
+with right:
+    st.markdown('<div class="card"><h3>🔍 Input DOIs</h3><div class="body">', unsafe_allow_html=True)
+    dois_text = st.text_area(
+        label="Paste one DOI per line",
+        label_visibility="collapsed",
+        height=180,
+        placeholder="10.1016/j.arr.2025.102847\n10.1016/j.arr.2025.102834\nhttps://doi.org/10.1038/nature12373",
+    )
+    st.markdown("</div></div>", unsafe_allow_html=True)
 
-    def _format_authors(msg: dict) -> str:
-        authors = msg.get("author", [])
-        parts = []
-
-        def fix_initials(s: str) -> str:
-            tokens = s.split()
-            fixed = []
-            for tok in tokens:
-                if len(tok) == 1 and tok.isalpha():
-                    fixed.append(tok + ".")
-                else:
-                    fixed.append(tok)
-            return " ".join(fixed)
-
-        if isinstance(authors, list):
-            for a in authors:
-                if not isinstance(a, dict):
-                    continue
-                given = (a.get("given") or "").strip()
-                family = (a.get("family") or "").strip()
-                literal = (a.get("name") or a.get("literal") or "").strip()
-                if given or family:
-                    given_fixed = fix_initials(given)
-                    name = (given_fixed + " " + family).strip()
-                else:
-                    name = literal
-                if name:
-                    parts.append(name)
-
-        return "; ".join(parts)
-
-    def _first(x):
-        if isinstance(x, list):
-            return x[0] if x else ""
-        return x or ""
-
-    def _extract_fields_generic(msg: dict, source: str) -> dict:
-        title = _first(msg.get("title"))
-        journal = _first(msg.get("container-title"))
-        publisher = msg.get("publisher", "") or msg.get("publisher-name", "")
-        year = None
-        for key in ["published-print", "issued", "published-online"]:
-            obj = msg.get(key, {})
-            if isinstance(obj, dict):
-                parts = obj.get("date-parts", [])
-                if parts and isinstance(parts[0], list) and parts[0]:
-                    year = parts[0][0]
-                    break
-        if not year:
-            try:
-                year = int(str(msg.get("created", {}).get("date-time", ""))[:4])
-            except Exception:
-                year = None
-
-        cites = msg.get("is-referenced-by-count", None) if source == "crossref" else None
-
-        return {
-            "Title": title,
-            "Authors": _format_authors(msg),
-            "Journal": journal,
-            "Publisher": publisher,
-            "Year": year,
-            "Citations (Crossref)": cites,
-        }
-
-    @st.cache_data(show_spinner=False, ttl=60*60*24*7)
-    def fetch_metadata_unified(doi: str) -> dict:
-        try:
-            msg = _crossref_fetch_raw(doi)
-            data = _extract_fields_generic(msg, source="crossref")
-            if data.get("Title") or data.get("Journal"):
-                return data
-        except Exception:
-            pass
-
-        try:
-            csl = _doi_content_negotiation(doi)
-            data = _extract_fields_generic(csl, source="csl")
-            if data.get("Title") or data.get("Journal"):
-                return data
-        except Exception as e:
-            return {"error": f"Not found via Crossref; DOI content negotiation also failed: {e}"}
-
-        return {"error": "Metadata not available from Crossref or DOI content negotiation."}
-
-    def fetch_parallel(dois: list[str], max_workers: int = 12) -> list[dict]:
-        order = {d: i for i, d in enumerate(dois)}
-        entries: list[dict] = []
-        with ThreadPoolExecutor(max_workers=min(max_workers, max(1, len(dois)))) as ex:
-            futs = {ex.submit(fetch_metadata_unified, d): d for d in dois}
-            total, done = len(futs), 0
-            progress = st.progress(0.0, text="Initializing...")
-            with st.spinner("🔍 Fetching metadata with universal DOI fallback..."):
-                for fut in as_completed(futs):
-                    doi = futs[fut]
-                    data = fut.result()
-                    if "error" in data:
-                        entry = {
-                            "DOI": doi,
-                            "Title": f"[ERROR] {data['error']}",
-                            "Authors": "",
-                            "Journal": "",
-                            "Publisher": "",
-                            "Year": None,
-                            "Citations (Crossref)": None,
-                        }
-                    else:
-                        entry = {"DOI": doi, **data}
-                    entries.append(entry)
-                    done += 1
-                    progress.progress(done / total, text=f"Processing {done}/{total} papers...")
-            progress.empty()
-        entries.sort(key=lambda e: order.get(e["DOI"], 10**9))
-        return entries
-
-    # Batch merge with RapidFuzz
-    def merge_enrich_fast(df: pd.DataFrame, jcr: pd.DataFrame, scopus: pd.DataFrame, cfg: MatchCfg) -> pd.DataFrame:
-        if df.empty:
-            return df
-        q = df["Journal"].fillna("").astype(str).map(normalize_journal).tolist()
-
-        imp = [None] * len(q)
-        qrt = [None] * len(q)
-        wos = [False if cfg.wos_if_missing else None] * len(q)
-
-        if not jcr.empty:
-            j_choices = jcr["__norm"].tolist()
-            if _USE_RAPIDFUZZ and q and j_choices:
-                scores = process.cdist(q, j_choices, scorer=fuzz.WRatio, workers=-1)
-                best_idx = scores.argmax(axis=1)
-                best_scr = scores.max(axis=1)
-                for i, s in enumerate(best_scr):
-                    if s >= cfg.min_score:
-                        row = jcr.iloc[best_idx[i]]
-                        imp[i] = row["Impact Factor"]
-                        qrt[i] = row["Quartile"]
-                        if cfg.wos_if_missing:
-                            wos[i] = True
-            else:
-                for i, name in enumerate(q):
-                    if not name:
-                        continue
-                    match = difflib.get_close_matches(name, j_choices, n=1, cutoff=0.0)
-                    if match:
-                        score = int(100 * difflib.SequenceMatcher(None, name, match[0]).ratio())
-                        if score >= cfg.min_score:
-                            row = jcr.iloc[j_choices.index(match[0])]
-                            imp[i] = row["Impact Factor"]
-                            qrt[i] = row["Quartile"]
-                            if cfg.wos_if_missing:
-                                wos[i] = True
-
-        scp = [False] * len(q)
-        if not scopus.empty:
-            s_choices = scopus["__norm"].tolist()
-            s_set = set(s_choices) if cfg.scopus_exact_first else set()
-            for i, name in enumerate(q):
-                if cfg.scopus_exact_first and name in s_set:
-                    scp[i] = True
-            if _USE_RAPIDFUZZ and q and s_choices:
-                need = [i for i, v in enumerate(scp) if not v]
-                if need:
-                    qs = [q[i] for i in need]
-                    scores = process.cdist(qs, s_choices, scorer=fuzz.WRatio, workers=-1)
-                    best_scr = scores.max(axis=1)
-                    for k, s in enumerate(best_scr):
-                        if s >= cfg.min_score:
-                            scp[need[k]] = True
-            else:
-                for i, name in enumerate(q):
-                    if scp[i]:
-                        continue
-                    match = difflib.get_close_matches(name, s_choices, n=1, cutoff=0.0)
-                    if match:
-                        score = int(100 * difflib.SequenceMatcher(None, name, match[0]).ratio())
-                        if score >= cfg.min_score:
-                            scp[i] = True
-
-        out = df.copy()
-        out["Impact Factor (JCR)"] = imp
-        out["Quartile (JCR)"] = qrt
-        out["Indexed in Scopus"] = scp
-        out["Indexed in Web of Science"] = wos
-        return out
-
-    # Sidebar with Enhanced UI
-    with st.sidebar:
-        st.markdown('<h2 style="color: var(--text-primary); margin-bottom: 20px;">⚙️ Configuration</h2>', unsafe_allow_html=True)
-        
-        st.markdown('<h3 style="color: var(--text-primary);">Matching Settings</h3>', unsafe_allow_html=True)
-        min_score = st.slider("🎯 Fuzzy Match Threshold", 60, 95, 80, 
-                              help="Higher score = stricter matching. Default: 80")
-        st.caption("💡 Tip: Start with default (80) for balanced accuracy")
-        
-        wos_if_jcr = st.checkbox("📊 Auto-mark WoS if in JCR", value=True,
-                                 help="Automatically mark as indexed in Web of Science if found in JCR database")
-        scopus_exact = st.checkbox("🔍 Scopus exact match first", value=True,
-                                  help="Try exact normalized matching before fuzzy matching for Scopus")
-        st.markdown('<hr>', unsafe_allow_html=True)
-        
-        st.markdown('<h3 style="color: var(--text-primary);">Performance</h3>', unsafe_allow_html=True)
-        fast_workers = st.slider("⚡ Parallel requests", 2, 16, 12,
-                                 help="Number of concurrent API requests")
-        st.markdown('<hr>', unsafe_allow_html=True)
-        
-        st.markdown('<h3 style="color: var(--text-primary);">📈 Database Stats</h3>', unsafe_allow_html=True)
-        st.markdown(f'<div class="metric-card"><div class="metric-value">29,270</div><div class="metric-label">JCR Journals Scanned</div></div>', unsafe_allow_html=True)
-        st.markdown(f'<div class="metric-card"><div class="metric-value">47,838</div><div class="metric-label">Scopus Journals Scanned</div></div>', unsafe_allow_html=True)
-
-    cfg = MatchCfg(min_score=min_score, wos_if_missing=wos_if_jcr, scopus_exact_first=scopus_exact)
-
-    # Main panel
-    st.markdown('<h3 style="color: var(--text-primary);">🔍 Input DOIs</h3>', unsafe_allow_html=True)
-
-    tab1 = st.tabs(["📋 Paste DOIs"])[0]
-    with tab1:
-        dois_text = st.text_area(
-            "Enter one DOI per line",
-            height=200,
-            placeholder="10.1016/j.arr.2025.102847\n10.1016/j.arr.2025.102834\n10.17179/excli2014-541\nhttps://doi.org/10.1038/nature12373",
-            help="You can paste DOIs with or without https://doi.org/ prefix"
+with left:
+    st.markdown('<div class="card"><h3>Action Buttons</h3><div class="body">', unsafe_allow_html=True)
+    c1, c2, c3 = st.columns([0.7, 0.7, 0.6])
+    go = c1.button("🚀 Fetch Metadata", type="primary", use_container_width=True)
+    clear = c2.button("🗑️ Clear All", use_container_width=True)
+    with c3:
+        lines = [ln.strip() for ln in (dois_text or "").splitlines() if ln.strip()]
+        uniq = sorted(set(re.sub(r"^https?://(dx\\.)?doi\\.org/", "", ln, flags=re.I).replace("doi:", "").strip() for ln in lines))
+        st.markdown(
+            f'<div class="kpi"><div class="v">{len(uniq)}</div><div class="l">DOIs</div></div>',
+            unsafe_allow_html=True,
         )
-    st.markdown('<hr>', unsafe_allow_html=True)
+    st.markdown('<div class="table-note">The buttons are intentionally thin (compact height) per your spec.</div>', unsafe_allow_html=True)
+    st.markdown("</div></div>", unsafe_allow_html=True)
 
-    # Action Buttons
-    st.markdown('<h3 style="color: var(--text-primary);">Action Buttons</h3>', unsafe_allow_html=True)
-    col1, col2, col3 = st.columns([2, 2, 1])
-    with col1:
-        fetch = st.button("🚀 Fetch Metadata", type="primary", use_container_width=True)
-    with col2:
-        if st.button("🗑️ Clear All", use_container_width=True):
-            if 'jcr_df' in st.session_state:
-                del st.session_state.jcr_df
-            if 'sc_df' in st.session_state:
-                del st.session_state.sc_df
-            st.rerun()
-    with col3:
-        raw_lines = [d for d in dois_text.splitlines() if d.strip()]
-        dois = list(dict.fromkeys(normalize_doi_input(d) for d in raw_lines))
-        st.markdown(f'<div class="metric-card"><div class="metric-value">{len(dois)}</div><div class="metric-label">DOIs</div></div>', unsafe_allow_html=True)
-    st.markdown('<hr>', unsafe_allow_html=True)
-
-    
-st.markdown('<hr>', unsafe_allow_html=True)
-
-# --- About section (centered card) ---
-if st.session_state.get("show_about"):
+# ABOUT card (below action area)
+st.markdown("<hr>", unsafe_allow_html=True)
+if st.session_state.show_about:
     st.markdown(
         """
-        <section style="margin:24px auto;max-width:900px;background:var(--card-bg);border:1px solid var(--border-color);border-radius:16px;box-shadow:0 10px 40px var(--shadow-medium);padding:20px;text-align:center">
-            <div class="badge" style="margin-bottom:8px;font-weight:800;background:linear-gradient(135deg,#5e72e4,#e94560);-webkit-background-clip:text;-webkit-text-fill-color:transparent;">About</div>
-            <p style="white-space:nowrap"><strong>DOI Navigator</strong> is a client-side tool that fetches paper metadata from DOIs and enriches it with JCR/Scopus (best‑effort).</p>
+        <section style="margin:24px auto;max-width:900px;background:var(--card-bg);
+            border:1px solid var(--border-color);border-radius:16px;box-shadow:0 10px 40px var(--shadow-medium);
+            padding:20px;text-align:center">
+            <div style="margin-bottom:8px;font-weight:800;background:linear-gradient(135deg,#5e72e4,#e94560);
+                -webkit-background-clip:text;-webkit-text-fill-color:transparent;">About</div>
+            <p style="white-space:nowrap"><strong>DOI Navigator</strong> fetches paper metadata from DOIs and (optionally) enriches with JCR/Scopus you provide locally.</p>
             <ul style="display:inline-block;text-align:left;margin:12px auto">
-                <li>Crossref + DOI content negotiation fallback</li>
-                <li>Optional JCR Impact Factor & Quartile, Scopus index</li>
-                <li>Export results to Excel; responsive UI</li>
+              <li>Crossref first; DOI CSL fallback</li>
+              <li>Optional: JCR impact factor &amp; quartile; Scopus index</li>
+              <li>Export results to Excel</li>
             </ul>
         </section>
         """,
-        unsafe_allow_html=True
+        unsafe_allow_html=True,
     )
 
-results_df = None
+# ===============================
+# -------- FETCH & BUILD --------
+# ===============================
 
-    def load_jcr_and_scopus():
-        jcr_url = JCR_FALLBACK_URL
-        scp_url = SCOPUS_FALLBACK_URL
-        
-        with st.container():
-            st.info("📄 Loading JCR and Scopus databases...")
-            progress_bar = st.progress(0)
-            status = st.empty()
-            
-            try:
-                status.text("Loading JCR database...")
-                progress_bar.progress(25)
-                jcr = load_jcr_cached(jcr_url) if jcr_url else pd.DataFrame(
-                    columns=["Journal", "Impact Factor", "Quartile", "__norm"]
-                )
-                
-                status.text("Loading Scopus database...")
-                progress_bar.progress(75)
-                scp = load_scopus_cached(scp_url) if scp_url else pd.DataFrame(
-                    columns=["Scopus Title", "__norm"]
-                )
-                
-                progress_bar.progress(100)
-                status.success("✅ Databases loaded successfully!")
-                
-                st.session_state.jcr_df = jcr
-                st.session_state.sc_df = scp
-                
-                import time
-                time.sleep(1)
-                
-            finally:
-                progress_bar.empty()
-                status.empty()
-        
-        return jcr, scp
+def update_progress(p: float, note: str = ""):
+    p = max(0.0, min(1.0, float(p)))
+    prog.empty()
+    with prog:
+        st.markdown('<div class="progress"><div style="width:{}%"></div></div>'.format(int(p * 100)), unsafe_allow_html=True)
+        if note:
+            st.caption(note)
 
-    if fetch:
-        if len(dois) == 0:
-            st.error("⚠️ Please enter at least one DOI to proceed.")
-        else:
-            jcr_df, sc_df = load_jcr_and_scopus()
-            
-            st.markdown('<h3 style="color: var(--text-primary);">🔍 Fetching Metadata</h3>', unsafe_allow_html=True)
-            
-            rows = fetch_parallel(dois, max_workers=fast_workers)
-            base_df = pd.DataFrame(rows)
-            
-            if not base_df.empty:
-                with st.spinner("📄 Matching with JCR and Scopus databases..."):
-                    results_df = merge_enrich_fast(base_df, jcr_df, sc_df, cfg)
-                st.success(f"✅ Successfully processed {len(results_df)} papers!")
-            st.markdown('<hr>', unsafe_allow_html=True)
+results_df: Optional[pd.DataFrame] = None
+prog = st.empty()
+status = st.empty()
 
-    # Display & Download
-    if results_df is not None and not results_df.empty:
-        results_df.index = pd.RangeIndex(start=1, stop=len(results_df) + 1, name="S.No.")
-        
-        st.markdown('<h3 style="color: var(--text-primary);">📊 Analysis Summary</h3>', unsafe_allow_html=True)
-        
-        col1, col2, col3, col4 = st.columns(4)
-        
-        total_papers = len(results_df)
-        wos_count = results_df["Indexed in Web of Science"].sum()
-        scopus_count = results_df["Indexed in Scopus"].sum()
-        q1_count = (results_df["Quartile (JCR)"] == "Q1").sum()
-        
-        with col1:
-            st.markdown(f'''
-            <div class="metric-card">
-                <div class="metric-value">{total_papers}</div>
-                <div class="metric-label">Total Papers</div>
-            </div>
-            ''', unsafe_allow_html=True)
-        
-        with col2:
-            wos_pct = (wos_count/total_papers*100) if total_papers > 0 else 0
-            st.markdown(f'''
-            <div class="metric-card">
-                <div class="metric-value">{wos_count}</div>
-                <div class="metric-label">WoS Indexed ({wos_pct:.1f}%)</div>
-            </div>
-            ''', unsafe_allow_html=True)
-        
-        with col3:
-            scopus_pct = (scopus_count/total_papers*100) if total_papers > 0 else 0
-            st.markdown(f'''
-            <div class="metric-card">
-                <div class="metric-value">{scopus_count}</div>
-                <div class="metric-label">Scopus Indexed ({scopus_pct:.1f}%)</div>
-            </div>
-            ''', unsafe_allow_html=True)
-        
-        with col4:
-            q1_pct = (q1_count/total_papers*100) if total_papers > 0 else 0
-            st.markdown(f'''
-            <div class="metric-card">
-                <div class="metric-value">{q1_count}</div>
-                <div class="metric-label">Q1 Papers ({q1_pct:.1f}%)</div>
-            </div>
-            ''', unsafe_allow_html=True)
-        st.markdown('<hr>', unsafe_allow_html=True)
-        
-        # Results Table
-        st.markdown('<h3 style="color: var(--text-primary);">🔓 Results Table</h3>', unsafe_allow_html=True)
-        
-        disp = results_df.copy()
-        
-        def yn_to_emoji(v):
-            if v is True:
-                return "✅ Yes"
-            if v is False:
-                return "❌ No"
-            return "➖ N/A"
-        
-        def format_quartile(v):
-            if pd.isna(v) or v == "":
-                return "➖"
-            return f"🏆 {v}" if v == "Q1" else f"📊 {v}"
-        
-        disp["Indexed in Scopus"] = disp["Indexed in Scopus"].map(yn_to_emoji)
-        disp["Indexed in Web of Science"] = disp["Indexed in Web of Science"].map(yn_to_emoji)
-        disp["Quartile (JCR)"] = disp["Quartile (JCR)"].map(format_quartile)
-        
-        st.dataframe(
-            disp, 
-            use_container_width=True,
-            height=400,
-            column_config={
-                "DOI": st.column_config.TextColumn("DOI", help="Digital Object Identifier"),
-                "Title": st.column_config.TextColumn("Title", width="large"),
-                "Authors": st.column_config.TextColumn("Authors", width="medium"),
-                "Journal": st.column_config.TextColumn("Journal", width="medium"),
-                "Year": st.column_config.NumberColumn("Year", format="%d"),
-                "Citations (Crossref)": st.column_config.NumberColumn("Citations", format="%d"),
-                "Impact Factor (JCR)": st.column_config.NumberColumn("Impact Factor", format="%.1f"),
-            }
-        )
-        st.markdown('<hr>', unsafe_allow_html=True)
-        
-        # Download Section
-        st.markdown('<h3 style="color: var(--text-primary);">💾 Export Options</h3>', unsafe_allow_html=True)
-        
-        export_df = results_df.copy()
-        export_df["Indexed in Scopus"] = export_df["Indexed in Scopus"].map(
-            lambda v: "Yes" if v is True else "No" if v is False else ""
-        )
-        export_df["Indexed in Web of Science"] = export_df["Indexed in Web of Science"].map(
-            lambda v: "Yes" if v is True else "No" if v is False else ""
-        )
-        
-        from io import BytesIO
-        output = BytesIO()
-        with pd.ExcelWriter(output, engine='openpyxl') as writer:
-            export_df.to_excel(writer, index=True, sheet_name='DOI Metadata')
-        excel_data = output.getvalue()
-        
-        st.download_button(
-            "📊 Download as Excel",
-            excel_data,
-            "doi_metadata.xlsx",
-            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            use_container_width=True
-        )
-        st.markdown('<hr>', unsafe_allow_html=True)
+if clear:
+    st.experimental_rerun()
 
+if go:
+    if not uniq:
+        st.warning("Please paste at least one DOI.")
     else:
-        st.markdown("""
-        <div style="text-align: center; padding: 40px;">
-            <h2 style="color: var(--text-primary); margin-bottom: 20px;">👋 Welcome to DOI Navigator</h2>
-            <p style="color: var(--text-secondary); font-size: 16px; line-height: 1.6;">
-                Enter DOIs above and click <strong>Fetch Metadata</strong> to extract comprehensive paper information.<br>
-                The app automatically matches papers with JCR and Scopus databases for impact factors and indexing status.
-            </p>
-            <div style="margin-top: 30px; display: flex; justify-content: center; gap: 40px;">
-                <div style="text-align: center;">
-                    <div style="font-size: 32px; margin-bottom: 10px;">📚</div>
-                    <div style="color: var(--text-secondary); font-size: 14px;">Multi-DOI Support</div>
-                </div>
-                <div style="text-align: center;">
-                    <div style="font-size: 32px; margin-bottom: 10px;">⚡</div>
-                    <div style="color: var(--text-secondary); font-size: 14px;">Fast Processing</div>
-                </div>
-                <div style="text-align: center;">
-                    <div style="font-size: 32px; margin-bottom: 10px;">🎯</div>
-                    <div style="color: var(--text-secondary); font-size: 14px;">Accurate Matching</div>
-                </div>
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
-        st.markdown('<hr>', unsafe_allow_html=True)
+        rows: List[Dict] = []
+        # Optional databases
+        JCR = pd.DataFrame()
+        SCOPUS = pd.DataFrame()
+        if jcr_file is not None:
+            try:
+                JCR = parse_uploaded_jcr(jcr_file)
+                st.success(f"Loaded JCR rows: {len(JCR):,}")
+            except Exception as e:
+                st.warning(f"Could not parse JCR: {e}")
+        if scopus_file is not None:
+            try:
+                SCOPUS = parse_uploaded_scopus(scopus_file)
+                st.success(f"Loaded Scopus rows: {len(SCOPUS):,}")
+            except Exception as e:
+                st.warning(f"Could not parse Scopus: {e}")
 
-    # Footer
-    year = datetime.now().year
-    st.markdown(f'''
-    <div class="footer-section">
-        <div class="footer-credit">
-            <strong>DOI Navigator v1.1</strong><br>
-            © {year} · Developed with ❤️ by Dr. Kunal Bhattacharya<br>
-            <span style="font-size: 12px; color: #5e72e4;">Powered by Crossref API · JCR · Scopus</span>
-        </div>
+        total = len(uniq)
+        for i, doi in enumerate(uniq, 1):
+            update_progress(i / (total + 2), f"Resolving {i}/{total}…")
+            time.sleep(0.01)
+            meta = {}
+            try:
+                msg = fetch_crossref(doi)
+                meta = extract_fields_from_crossref(msg)
+            except Exception:
+                try:
+                    msg = fetch_csl(doi)
+                    # Map a few basic fields from CSL
+                    meta = {
+                        "Title": msg.get("title", ""),
+                        "Authors": ", ".join(a.get("family", "") for a in msg.get("author", []) if a.get("family")),
+                        "Journal": msg.get("container-title", ""),
+                        "Publisher": msg.get("publisher", ""),
+                        "Year": msg.get("issued", {}).get("date-parts", [[None]])[0][0] if msg.get("issued") else "",
+                        "Citations (Crossref)": "",
+                    }
+                except Exception as e:
+                    meta = {"Title": f"[ERROR] {e}", "Authors": "", "Journal": "", "Publisher": "", "Year": "", "Citations (Crossref)": ""}
+
+            rows.append({"DOI": doi, **meta})
+
+        df = pd.DataFrame(rows)
+        # Enrichment (best-effort, local)
+        update_progress(0.75, "Matching with JCR / Scopus…")
+
+        impact = [""] * len(df)
+        quart = [""] * len(df)
+        wos = ["" if not wos_if_jcr else False] * len(df)
+        sc_index = [False] * len(df)
+
+        if not df.empty:
+            norm = df["Journal"].map(normalize_journal)
+
+            if not JCR.empty:
+                jcr_map = JCR.to_dict("records")
+                for i, target in enumerate(norm):
+                    best = None
+                    best_score = 0
+                    for cand in jcr_map:
+                        s = cand["__norm"]
+                        score = quick_score(target, s)
+                        if score > best_score:
+                            best_score = score
+                            best = cand
+                    if best and best_score >= min_score:
+                        impact[i] = best.get("Impact Factor", "")
+                        quart[i] = best.get("Quartile", "")
+                        if wos_if_jcr:
+                            wos[i] = True
+
+            if not SCOPUS.empty:
+                sc_map = SCOPUS["__norm"].tolist()
+                for i, target in enumerate(norm):
+                    ok = False
+                    if scopus_exact_first:
+                        ok = target in sc_map
+                    if not ok:
+                        best_score = 0
+                        for s in sc_map:
+                            score = quick_score(target, s)
+                            if score > best_score:
+                                best_score = score
+                            if score >= min_score:
+                                ok = True
+                                break
+                    sc_index[i] = ok
+
+        df["Impact Factor (JCR)"] = impact
+        df["Quartile (JCR)"] = quart
+        df["Indexed in Scopus"] = ["✅ Yes" if v else ("➖ N/A" if SCOPUS.empty else "❌ No") for v in sc_index]
+        df["Indexed in Web of Science"] = ["✅ Yes" if v is True else ("➖ N/A" if v == "" else "❌ No") for v in wos]
+
+        results_df = df
+        update_progress(1.0, "Done")
+
+# ===============================
+# --------- RESULTS UI ----------
+# ===============================
+
+if results_df is not None:
+    # Summary KPI
+    st.markdown('<div class="card"><h3>📊 Analysis Summary</h3><div class="body">', unsafe_allow_html=True)
+    c1, c2, c3, c4 = st.columns(4)
+    total = len(results_df)
+    q1_count = (results_df["Quartile (JCR)"] == "Q1").sum()
+    wos_count = (results_df["Indexed in Web of Science"] == "✅ Yes").sum()
+    sc_count = (results_df["Indexed in Scopus"] == "✅ Yes").sum()
+    c1.markdown(f'<div class="kpi"><div class="v">{total}</div><div class="l">Total Papers</div></div>', unsafe_allow_html=True)
+    c2.markdown(f'<div class="kpi"><div class="v">{wos_count}</div><div class="l">WoS Indexed ({(wos_count/max(1,total))*100:.1f}%)</div></div>', unsafe_allow_html=True)
+    c3.markdown(f'<div class="kpi"><div class="v">{sc_count}</div><div class="l">Scopus Indexed ({(sc_count/max(1,total))*100:.1f}%)</div></div>', unsafe_allow_html=True)
+    c4.markdown(f'<div class="kpi"><div class="v">{q1_count}</div><div class="l">Q1 Papers ({(q1_count/max(1,total))*100:.1f}%)</div></div>', unsafe_allow_html=True)
+    st.markdown("</div></div>", unsafe_allow_html=True)
+
+    # Table + Download
+    st.markdown('<div class="card"><h3>🔓 Results Table</h3><div class="body">', unsafe_allow_html=True)
+    st.dataframe(results_df, use_container_width=True, hide_index=True)
+    st.markdown('<div class="table-note">Powered by Crossref + DOI content negotiation; JCR/Scopus enrichment is local & optional.</div>', unsafe_allow_html=True)
+
+    def to_excel_bytes(df: pd.DataFrame) -> bytes:
+        with io.BytesIO() as buffer:
+            with pd.ExcelWriter(buffer, engine="xlsxwriter") as writer:
+                df.to_excel(writer, sheet_name="DOI Metadata", index=False)
+            return buffer.getvalue()
+
+    dl = st.download_button(
+        label="📊 Download as Excel",
+        data=to_excel_bytes(results_df),
+        file_name="doi_metadata.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        type="primary",
+        use_container_width=False,
+    )
+    st.markdown("</div></div>", unsafe_allow_html=True)
+
+# ===============================
+# ----------- FOOTER ------------
+# ===============================
+
+st.markdown(
+    """
+    <div class="footer">
+      <strong>DOI Navigator</strong><br>
+      © 2025 · Developed by Dr. Kunal Bhattacharya ·
+      <a href="mailto:kunal.bhattacharya221@gmail.com">kunal.bhattacharya221@gmail.com</a>
     </div>
-    ''', unsafe_allow_html=True)
-
-# --------------------------------------------------------------------
-# MAIN ENTRY POINT WITH AUTHENTICATION (UNCHANGED)
-# --------------------------------------------------------------------
-def main():
-    """Main application entry point without login/signup"""
-    run_original_app()
-
-if __name__ == "__main__":
-    main()
+    """,
+    unsafe_allow_html=True,
+)
