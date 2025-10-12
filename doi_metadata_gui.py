@@ -709,16 +709,73 @@ hr {
         with col_b:
             if st.button("About", help="Click to show/hide About", key="about_toggle"):
                 st.session_state.show_about = not st.session_state.show_about
-        with col_c:
-            st.markdown(
-                '<a href="mailto:kunal.bhattacharya221@gmail.com" '
-                'style="display:inline-block;padding:10px 16px;border:1px solid var(--border-color);'
+;'
                 'border-radius:999px;background:var(--card-bg);text-decoration:none;'
                 'color:var(--text-primary);font-weight:600">✉️ Email</a>',
                 unsafe_allow_html=True
             )
     
     # Session / networking (UNCHANGED from original)
+
+# --- Top-right actions (About + Theme) using query params (no JS) ---
+if "show_about" not in st.session_state:
+    st.session_state.show_about = False
+if "theme_mode" not in st.session_state:
+    st.session_state.theme_mode = "auto"  # auto/light/dark
+
+params = st.query_params
+if "about" in params:
+    st.session_state.show_about = not st.session_state.show_about
+    st.query_params.clear()
+if "theme" in params:
+    order = {"auto":"dark", "dark":"light", "light":"auto"}
+    st.session_state.theme_mode = order.get(st.session_state.theme_mode, "auto")
+    st.query_params.clear()
+
+# Inject CSS overrides if user picked a specific theme
+if st.session_state.theme_mode in ("light","dark"):
+    if st.session_state.theme_mode == "light":
+        st.markdown('''
+        <style>
+        :root {
+            --primary-bg: #ffffff; --secondary-bg: #f8f9fa; --tertiary-bg: #e9ecef;
+            --card-bg: rgba(255,255,255,0.95); --card-bg-alt: rgba(248,249,250,0.95);
+            --text-primary:#212529; --text-secondary:#6c757d; --text-muted:#868e96;
+            --border-color: rgba(0, 0, 0, 0.125); --border-light: rgba(0, 0, 0, 0.06);
+            --shadow-light: rgba(0, 0, 0, 0.08); --shadow-medium: rgba(0, 0, 0, 0.12);
+            --input-bg: rgba(255,255,255,0.9); --input-border: rgba(94,114,228,0.25);
+            --sidebar-bg: rgba(248,249,250,0.95);
+        }
+        </style>
+        ''', unsafe_allow_html=True)
+    else:
+        st.markdown('''
+        <style>
+        :root {
+            --primary-bg:#1a1a2e; --secondary-bg:#16213e; --tertiary-bg:#0f3460;
+            --card-bg: rgba(15,23,42,0.95); --card-bg-alt: rgba(22,33,62,0.95);
+            --text-primary:#e2e8f0; --text-secondary:#94a3b8; --text-muted:#64748b;
+            --border-color: rgba(255,255,255,0.1); --border-light: rgba(255,255,255,0.05);
+            --shadow-light: rgba(0,0,0,0.2); --shadow-medium: rgba(0,0,0,0.3);
+            --input-bg: rgba(15,23,42,0.8); --input-border: rgba(94,114,228,0.4);
+            --sidebar-bg: rgba(15,23,42,0.95);
+        }
+        </style>
+        ''', unsafe_allow_html=True)
+
+# Fixed top-right pills
+st.markdown(
+    f'''
+    <div style="position:fixed;top:10px;right:14px;z-index:9999;display:flex;gap:8px;align-items:center">
+      <a href="?about=1" style="border:1px solid var(--border-color);padding:8px 12px;border-radius:999px;background:var(--card-bg);text-decoration:none;color:var(--text-primary);font-weight:700">About</a>
+      <a href="?theme=1" title="Theme: {st.session_state.theme_mode}" style="border:1px solid var(--border-color);padding:8px 12px;border-radius:999px;background:var(--card-bg);text-decoration:none;color:var(--text-primary);font-weight:700">
+        {'🌙' if st.session_state.theme_mode!='dark' else '🌞'}
+      </a>
+    </div>
+    ''',
+    unsafe_allow_html=True
+)
+
 
     def _get_session() -> requests.Session:
         s = requests.Session()
