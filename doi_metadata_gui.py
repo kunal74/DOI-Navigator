@@ -698,26 +698,11 @@ hr {
     <h1 class="main-title">🔍 DOI Navigator</h1>
     <p class="subtitle">Advanced Research Paper Metadata Extraction & Analysis</p>
 </div>
-
 """, unsafe_allow_html=True)
-
-    # --- Header actions: About toggle + email contact (keeps design intact) ---
-    if "show_about" not in st.session_state:
-        st.session_state.show_about = False
-    with st.container():
-        col_a, col_b, col_c = st.columns([6,1,1])
-        with col_b:
-            if st.button("About", help="Click to show/hide About", key="about_toggle"):
-                st.session_state.show_about = not st.session_state.show_about
-;'
-                'border-radius:999px;background:var(--card-bg);text-decoration:none;'
-                'color:var(--text-primary);font-weight:600">✉️ Email</a>',
-                unsafe_allow_html=True
-            )
     
     # Session / networking (UNCHANGED from original)
 
-# --- Top-right actions (About + Theme) using query params (no JS) ---
+# --- Top-right actions (About + Theme) using query params (quote-safe) ---
 if "show_about" not in st.session_state:
     st.session_state.show_about = False
 if "theme_mode" not in st.session_state:
@@ -728,54 +713,57 @@ if "about" in params:
     st.session_state.show_about = not st.session_state.show_about
     st.query_params.clear()
 if "theme" in params:
-    order = {"auto":"dark", "dark":"light", "light":"auto"}
+    order = {"auto": "dark", "dark": "light", "light": "auto"}
     st.session_state.theme_mode = order.get(st.session_state.theme_mode, "auto")
     st.query_params.clear()
 
 # Inject CSS overrides if user picked a specific theme
-if st.session_state.theme_mode in ("light","dark"):
+if st.session_state.theme_mode in ("light", "dark"):
     if st.session_state.theme_mode == "light":
-        st.markdown('''
-        <style>
-        :root {
-            --primary-bg: #ffffff; --secondary-bg: #f8f9fa; --tertiary-bg: #e9ecef;
-            --card-bg: rgba(255,255,255,0.95); --card-bg-alt: rgba(248,249,250,0.95);
-            --text-primary:#212529; --text-secondary:#6c757d; --text-muted:#868e96;
-            --border-color: rgba(0, 0, 0, 0.125); --border-light: rgba(0, 0, 0, 0.06);
-            --shadow-light: rgba(0, 0, 0, 0.08); --shadow-medium: rgba(0, 0, 0, 0.12);
-            --input-bg: rgba(255,255,255,0.9); --input-border: rgba(94,114,228,0.25);
-            --sidebar-bg: rgba(248,249,250,0.95);
-        }
-        </style>
-        ''', unsafe_allow_html=True)
+        st.markdown(
+            """
+            <style>
+            :root {
+                --primary-bg:#ffffff; --secondary-bg:#f8f9fa; --tertiary-bg:#e9ecef;
+                --card-bg:rgba(255,255,255,0.95); --card-bg-alt:rgba(248,249,250,0.95);
+                --text-primary:#212529; --text-secondary:#6c757d; --text-muted:#868e96;
+                --border-color:rgba(0,0,0,0.125); --border-light:rgba(0,0,0,0.06);
+                --shadow-light:rgba(0,0,0,0.08); --shadow-medium:rgba(0,0,0,0.12);
+                --input-bg:rgba(255,255,255,0.9); --input-border:rgba(94,114,228,0.25);
+                --sidebar-bg:rgba(248,249,250,0.95);
+            }
+            </style>
+            """,
+            unsafe_allow_html=True
+        )
     else:
-        st.markdown('''
-        <style>
-        :root {
-            --primary-bg:#1a1a2e; --secondary-bg:#16213e; --tertiary-bg:#0f3460;
-            --card-bg: rgba(15,23,42,0.95); --card-bg-alt: rgba(22,33,62,0.95);
-            --text-primary:#e2e8f0; --text-secondary:#94a3b8; --text-muted:#64748b;
-            --border-color: rgba(255,255,255,0.1); --border-light: rgba(255,255,255,0.05);
-            --shadow-light: rgba(0,0,0,0.2); --shadow-medium: rgba(0,0,0,0.3);
-            --input-bg: rgba(15,23,42,0.8); --input-border: rgba(94,114,228,0.4);
-            --sidebar-bg: rgba(15,23,42,0.95);
-        }
-        </style>
-        ''', unsafe_allow_html=True)
+        st.markdown(
+            """
+            <style>
+            :root {
+                --primary-bg:#1a1a2e; --secondary-bg:#16213e; --tertiary-bg:#0f3460;
+                --card-bg:rgba(15,23,42,0.95); --card-bg-alt:rgba(22,33,62,0.95);
+                --text-primary:#e2e8f0; --text-secondary:#94a3b8; --text-muted:#64748b;
+                --border-color:rgba(255,255,255,0.1); --border-light:rgba(255,255,255,0.05);
+                --shadow-light:rgba(0,0,0,0.2); --shadow-medium:rgba(0,0,0,0.3);
+                --input-bg:rgba(15,23,42,0.8); --input-border:rgba(94,114,228,0.4);
+                --sidebar-bg:rgba(15,23,42,0.95);
+            }
+            </style>
+            """,
+            unsafe_allow_html=True
+        )
 
-# Fixed top-right pills
+_icon = "🌞" if st.session_state.theme_mode == "dark" else "🌙"
 st.markdown(
-    f'''
+    f"""
     <div style="position:fixed;top:10px;right:14px;z-index:9999;display:flex;gap:8px;align-items:center">
       <a href="?about=1" style="border:1px solid var(--border-color);padding:8px 12px;border-radius:999px;background:var(--card-bg);text-decoration:none;color:var(--text-primary);font-weight:700">About</a>
-      <a href="?theme=1" title="Theme: {st.session_state.theme_mode}" style="border:1px solid var(--border-color);padding:8px 12px;border-radius:999px;background:var(--card-bg);text-decoration:none;color:var(--text-primary);font-weight:700">
-        {'🌙' if st.session_state.theme_mode!='dark' else '🌞'}
-      </a>
+      <a href="?theme=1" title="Theme: {st.session_state.theme_mode}" style="border:1px solid var(--border-color);padding:8px 12px;border-radius:999px;background:var(--card-bg);text-decoration:none;color:var(--text-primary);font-weight:700">{_icon}</a>
     </div>
-    ''',
+    """,
     unsafe_allow_html=True
 )
-
 
     def _get_session() -> requests.Session:
         s = requests.Session()
@@ -1123,24 +1111,27 @@ st.markdown(
         st.markdown(f'<div class="metric-card"><div class="metric-value">{len(dois)}</div><div class="metric-label">DOIs</div></div>', unsafe_allow_html=True)
     st.markdown('<hr>', unsafe_allow_html=True)
 
-    # --- About section (centered card) ---
-    if st.session_state.get("show_about"):
-        st.markdown(
-            '''
-            <section style="margin:24px auto;max-width:900px;background:var(--card-bg);border:1px solid var(--border-color);border-radius:16px;box-shadow:0 10px 40px var(--shadow-medium);padding:20px;text-align:center">
-                <div class="badge" style="margin-bottom:8px;font-weight:800;background:linear-gradient(135deg,#5e72e4,#e94560);-webkit-background-clip:text;-webkit-text-fill-color:transparent;">About</div>
-                <p style="white-space:nowrap"><strong>DOI Navigator</strong> is a client‑side tool that fetches paper metadata from DOIs and enriches it with JCR/Scopus (best‑effort).</p>
-                <ul style="display:inline-block;text-align:left;margin:12px auto">
-                    <li>Crossref + DOI content negotiation fallback</li>
-                    <li>Optional JCR Impact Factor & Quartile, Scopus index</li>
-                    <li>Export results to Excel; responsive UI</li>
-                </ul>
-            </section>
-            ''',
-            unsafe_allow_html=True
-        )
+    
+st.markdown('<hr>', unsafe_allow_html=True)
 
-    results_df = None
+# --- About section (centered card) ---
+if st.session_state.get("show_about"):
+    st.markdown(
+        """
+        <section style="margin:24px auto;max-width:900px;background:var(--card-bg);border:1px solid var(--border-color);border-radius:16px;box-shadow:0 10px 40px var(--shadow-medium);padding:20px;text-align:center">
+            <div class="badge" style="margin-bottom:8px;font-weight:800;background:linear-gradient(135deg,#5e72e4,#e94560);-webkit-background-clip:text;-webkit-text-fill-color:transparent;">About</div>
+            <p style="white-space:nowrap"><strong>DOI Navigator</strong> is a client-side tool that fetches paper metadata from DOIs and enriches it with JCR/Scopus (best‑effort).</p>
+            <ul style="display:inline-block;text-align:left;margin:12px auto">
+                <li>Crossref + DOI content negotiation fallback</li>
+                <li>Optional JCR Impact Factor & Quartile, Scopus index</li>
+                <li>Export results to Excel; responsive UI</li>
+            </ul>
+        </section>
+        """,
+        unsafe_allow_html=True
+    )
+
+results_df = None
 
     def load_jcr_and_scopus():
         jcr_url = JCR_FALLBACK_URL
@@ -1341,7 +1332,7 @@ st.markdown(
         <div class="footer-credit">
             <strong>DOI Navigator v1.1</strong><br>
             © {year} · Developed with ❤️ by Dr. Kunal Bhattacharya<br>
-            <span style="font-size: 12px; color: #5e72e4;">Powered by Crossref API · JCR · Scopus</span><br><a href="mailto:kunal.bhattacharya221@gmail.com" style="text-decoration:none;color:inherit">kunal.bhattacharya221@gmail.com</a>
+            <span style="font-size: 12px; color: #5e72e4;">Powered by Crossref API · JCR · Scopus</span>
         </div>
     </div>
     ''', unsafe_allow_html=True)
