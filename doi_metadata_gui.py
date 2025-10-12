@@ -672,10 +672,7 @@ hr {
 </style>
 """, unsafe_allow_html=True)
 
-  
-    # Added contact email line (per user request)
-    st.markdown('\n    <div style="text-align:center;margin-top:8px;color:var(--text-secondary);">Email: <a href="mailto:kunal.bhattacharya221@gmail.com" style="text-decoration:none;color:inherit">kunal.bhattacharya221@gmail.com</a></div>\n    ', unsafe_allow_html=True)
-# Hero Section with Enhanced Background Animation
+  # Hero Section with Enhanced Background Animation
     st.markdown("""
 <div class="hero-section">
     <div class="geometric-bg">
@@ -1017,6 +1014,68 @@ hr {
         st.markdown(f'<div class="metric-card"><div class="metric-value">29,270</div><div class="metric-label">JCR Journals Scanned</div></div>', unsafe_allow_html=True)
         st.markdown(f'<div class="metric-card"><div class="metric-value">47,838</div><div class="metric-label">Scopus Journals Scanned</div></div>', unsafe_allow_html=True)
 
+    
+    # ---- Theme Toggle (manual dark/light) ----
+    with st.sidebar:
+        st.markdown('<hr>', unsafe_allow_html=True)
+        st.markdown('<h3 style="color: var(--text-primary);">🌓 Theme</h3>', unsafe_allow_html=True)
+        _theme_dark = st.toggle("🌙 Dark mode", value=False, help="Toggle between light and dark theme")
+
+    if _theme_dark:
+        st.markdown(\"\"\"
+        <style>
+        html[data-theme='dark'] {
+            --primary-bg: #1a1a2e;
+            --secondary-bg: #16213e;
+            --tertiary-bg: #0f3460;
+            --card-bg: rgba(15, 23, 42, 0.95);
+            --card-bg-alt: rgba(22, 33, 62, 0.95);
+            --text-primary: #e2e8f0;
+            --text-secondary: #94a3b8;
+            --text-muted: #64748b;
+            --border-color: rgba(255, 255, 255, 0.1);
+            --border-light: rgba(255, 255, 255, 0.05);
+            --shadow-light: rgba(0, 0, 0, 0.2);
+            --shadow-medium: rgba(0, 0, 0, 0.3);
+            --shadow-heavy: rgba(0, 0, 0, 0.4);
+            --input-bg: rgba(15, 23, 42, 0.8);
+            --input-border: rgba(94, 114, 228, 0.4);
+            --sidebar-bg: rgba(15, 23, 42, 0.95);
+            --gradient-bg: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+        }
+        </style>
+        <script>
+        document.documentElement.setAttribute('data-theme','dark');
+        </script>
+        \"\"\", unsafe_allow_html=True)
+    else:
+        st.markdown(\"\"\"
+        <style>
+        html[data-theme='light'] {
+            --primary-bg: #ffffff;
+            --secondary-bg: #f8f9fa;
+            --tertiary-bg: #e9ecef;
+            --card-bg: rgba(255, 255, 255, 0.95);
+            --card-bg-alt: rgba(248, 249, 250, 0.95);
+            --text-primary: #212529;
+            --text-secondary: #6c757d;
+            --text-muted: #868e96;
+            --border-color: rgba(0, 0, 0, 0.125);
+            --border-light: rgba(0, 0, 0, 0.06);
+            --shadow-light: rgba(0, 0, 0, 0.08);
+            --shadow-medium: rgba(0, 0, 0, 0.12);
+            --shadow-heavy: rgba(0, 0, 0, 0.16);
+            --input-bg: rgba(255, 255, 255, 0.9);
+            --input-border: rgba(94, 114, 228, 0.25);
+            --sidebar-bg: rgba(248, 249, 250, 0.95);
+            --gradient-bg: linear-gradient(135deg, #ffffff 0%, #f8f9fa 50%, #e9ecef 100%);
+        }
+        </style>
+        <script>
+        document.documentElement.setAttribute('data-theme','light');
+        </script>
+        \"\"\", unsafe_allow_html=True)
+
     cfg = MatchCfg(min_score=min_score, wos_if_missing=wos_if_jcr, scopus_exact_first=scopus_exact)
 
     # Main panel
@@ -1251,6 +1310,7 @@ hr {
         <div class="footer-credit">
             <strong>DOI Navigator v1.1</strong><br>
             © {year} · Developed with ❤️ by Dr. Kunal Bhattacharya<br>
+                        Email: kunal.bhattacharya221@gmail.com<br>
             <span style="font-size: 12px; color: #5e72e4;">Powered by Crossref API · JCR · Scopus</span>
         </div>
     </div>
