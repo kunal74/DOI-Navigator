@@ -999,7 +999,7 @@ hr {
         _manual_dark = st.toggle("🌙 Dark mode", value=False, help="Switch between light and dark")
 
         if _manual_dark:
-            st.markdown(\"\"\"
+            st.markdown("""
             <style>
             /* Manual DARK overrides (keeps your existing design intact) */
             :root {
@@ -1021,9 +1021,9 @@ hr {
                 --sidebar-bg: rgba(15, 23, 42, 0.95);
             }
             </style>
-            \"\"\", unsafe_allow_html=True)
+            """, unsafe_allow_html=True)
         else:
-            st.markdown(\"\"\"
+            st.markdown("""
             <style>
             /* Manual LIGHT overrides (keeps your existing design intact) */
             :root {
@@ -1045,7 +1045,7 @@ hr {
                 --sidebar-bg: rgba(248, 249, 250, 0.95);
             }
             </style>
-            \"\"\", unsafe_allow_html=True)
+            """, unsafe_allow_html=True)
         # ------------------------------------------------------------
 st.markdown('<h2 style="color: var(--text-primary); margin-bottom: 20px;">⚙️ Configuration</h2>', unsafe_allow_html=True)
         
