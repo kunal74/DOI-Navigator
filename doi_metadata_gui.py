@@ -1047,7 +1047,7 @@ hr {
             </style>
             """, unsafe_allow_html=True)
         # ------------------------------------------------------------
-st.markdown('<h2 style="color: var(--text-primary); margin-bottom: 20px;">⚙️ Configuration</h2>', unsafe_allow_html=True)
+        st.markdown('<h2 style="color: var(--text-primary); margin-bottom: 20px;">⚙️ Configuration</h2>', unsafe_allow_html=True)
         
         st.markdown('<h3 style="color: var(--text-primary);">Matching Settings</h3>', unsafe_allow_html=True)
         min_score = st.slider("🎯 Fuzzy Match Threshold", 60, 95, 80, 
