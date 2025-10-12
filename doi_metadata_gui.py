@@ -992,7 +992,62 @@ hr {
 
     # Sidebar with Enhanced UI
     with st.sidebar:
-        st.markdown('<h2 style="color: var(--text-primary); margin-bottom: 20px;">⚙️ Configuration</h2>', unsafe_allow_html=True)
+        
+        # ------------------ Theme Toggle (manual) ------------------
+        st.markdown('<hr>', unsafe_allow_html=True)
+        st.markdown('<h3 style="color: var(--text-primary);">🌓 Theme</h3>', unsafe_allow_html=True)
+        _manual_dark = st.toggle("🌙 Dark mode", value=False, help="Switch between light and dark")
+
+        if _manual_dark:
+            st.markdown(\"\"\"
+            <style>
+            /* Manual DARK overrides (keeps your existing design intact) */
+            :root {
+                --primary-bg: #0f172a;
+                --secondary-bg: #111827;
+                --tertiary-bg: #0b1220;
+                --card-bg: rgba(15, 23, 42, 0.95);
+                --card-bg-alt: rgba(17, 24, 39, 0.95);
+                --text-primary: #e5e7eb;
+                --text-secondary: #cbd5e1;
+                --text-muted: #94a3b8;
+                --border-color: rgba(255, 255, 255, 0.12);
+                --border-light: rgba(255, 255, 255, 0.06);
+                --shadow-light: rgba(0, 0, 0, 0.25);
+                --shadow-medium: rgba(0, 0, 0, 0.35);
+                --shadow-heavy: rgba(0, 0, 0, 0.45);
+                --input-bg: rgba(15, 23, 42, 0.9);
+                --input-border: rgba(94, 114, 228, 0.45);
+                --sidebar-bg: rgba(15, 23, 42, 0.95);
+            }
+            </style>
+            \"\"\", unsafe_allow_html=True)
+        else:
+            st.markdown(\"\"\"
+            <style>
+            /* Manual LIGHT overrides (keeps your existing design intact) */
+            :root {
+                --primary-bg: #ffffff;
+                --secondary-bg: #f8f9fa;
+                --tertiary-bg: #e9ecef;
+                --card-bg: rgba(255, 255, 255, 0.96);
+                --card-bg-alt: rgba(248, 249, 250, 0.96);
+                --text-primary: #1f2937;
+                --text-secondary: #4b5563;
+                --text-muted: #6b7280;
+                --border-color: rgba(0, 0, 0, 0.12);
+                --border-light: rgba(0, 0, 0, 0.06);
+                --shadow-light: rgba(0, 0, 0, 0.08);
+                --shadow-medium: rgba(0, 0, 0, 0.12);
+                --shadow-heavy: rgba(0, 0, 0, 0.16);
+                --input-bg: rgba(255, 255, 255, 0.94);
+                --input-border: rgba(94, 114, 228, 0.30);
+                --sidebar-bg: rgba(248, 249, 250, 0.95);
+            }
+            </style>
+            \"\"\", unsafe_allow_html=True)
+        # ------------------------------------------------------------
+st.markdown('<h2 style="color: var(--text-primary); margin-bottom: 20px;">⚙️ Configuration</h2>', unsafe_allow_html=True)
         
         st.markdown('<h3 style="color: var(--text-primary);">Matching Settings</h3>', unsafe_allow_html=True)
         min_score = st.slider("🎯 Fuzzy Match Threshold", 60, 95, 80, 
@@ -1013,68 +1068,6 @@ hr {
         st.markdown('<h3 style="color: var(--text-primary);">📈 Database Stats</h3>', unsafe_allow_html=True)
         st.markdown(f'<div class="metric-card"><div class="metric-value">29,270</div><div class="metric-label">JCR Journals Scanned</div></div>', unsafe_allow_html=True)
         st.markdown(f'<div class="metric-card"><div class="metric-value">47,838</div><div class="metric-label">Scopus Journals Scanned</div></div>', unsafe_allow_html=True)
-
-    
-    # ---- Theme Toggle (manual dark/light) ----
-    with st.sidebar:
-        st.markdown('<hr>', unsafe_allow_html=True)
-        st.markdown('<h3 style="color: var(--text-primary);">🌓 Theme</h3>', unsafe_allow_html=True)
-        _theme_dark = st.toggle("🌙 Dark mode", value=False, help="Toggle between light and dark theme")
-
-    if _theme_dark:
-        st.markdown(\"\"\"
-        <style>
-        html[data-theme='dark'] {
-            --primary-bg: #1a1a2e;
-            --secondary-bg: #16213e;
-            --tertiary-bg: #0f3460;
-            --card-bg: rgba(15, 23, 42, 0.95);
-            --card-bg-alt: rgba(22, 33, 62, 0.95);
-            --text-primary: #e2e8f0;
-            --text-secondary: #94a3b8;
-            --text-muted: #64748b;
-            --border-color: rgba(255, 255, 255, 0.1);
-            --border-light: rgba(255, 255, 255, 0.05);
-            --shadow-light: rgba(0, 0, 0, 0.2);
-            --shadow-medium: rgba(0, 0, 0, 0.3);
-            --shadow-heavy: rgba(0, 0, 0, 0.4);
-            --input-bg: rgba(15, 23, 42, 0.8);
-            --input-border: rgba(94, 114, 228, 0.4);
-            --sidebar-bg: rgba(15, 23, 42, 0.95);
-            --gradient-bg: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
-        }
-        </style>
-        <script>
-        document.documentElement.setAttribute('data-theme','dark');
-        </script>
-        \"\"\", unsafe_allow_html=True)
-    else:
-        st.markdown(\"\"\"
-        <style>
-        html[data-theme='light'] {
-            --primary-bg: #ffffff;
-            --secondary-bg: #f8f9fa;
-            --tertiary-bg: #e9ecef;
-            --card-bg: rgba(255, 255, 255, 0.95);
-            --card-bg-alt: rgba(248, 249, 250, 0.95);
-            --text-primary: #212529;
-            --text-secondary: #6c757d;
-            --text-muted: #868e96;
-            --border-color: rgba(0, 0, 0, 0.125);
-            --border-light: rgba(0, 0, 0, 0.06);
-            --shadow-light: rgba(0, 0, 0, 0.08);
-            --shadow-medium: rgba(0, 0, 0, 0.12);
-            --shadow-heavy: rgba(0, 0, 0, 0.16);
-            --input-bg: rgba(255, 255, 255, 0.9);
-            --input-border: rgba(94, 114, 228, 0.25);
-            --sidebar-bg: rgba(248, 249, 250, 0.95);
-            --gradient-bg: linear-gradient(135deg, #ffffff 0%, #f8f9fa 50%, #e9ecef 100%);
-        }
-        </style>
-        <script>
-        document.documentElement.setAttribute('data-theme','light');
-        </script>
-        \"\"\", unsafe_allow_html=True)
 
     cfg = MatchCfg(min_score=min_score, wos_if_missing=wos_if_jcr, scopus_exact_first=scopus_exact)
 
