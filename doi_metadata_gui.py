@@ -992,7 +992,6 @@ hr {
 
     # Sidebar with Enhanced UI
     with st.sidebar:
-        
         # ------------------ Theme Toggle (manual) ------------------
         st.markdown('<hr>', unsafe_allow_html=True)
         st.markdown('<h3 style="color: var(--text-primary);">🌓 Theme</h3>', unsafe_allow_html=True)
@@ -1000,14 +999,17 @@ hr {
 
         if _manual_dark:
             st.markdown("""
+            <script>
+            // add an attribute to the root element for higher CSS specificity
+            document.documentElement.setAttribute('data-theme','manual-dark');
+            </script>
             <style>
-            /* Manual DARK overrides (keeps your existing design intact) */
-            :root {
+            html[data-theme='manual-dark'] {
                 --primary-bg: #0f172a;
                 --secondary-bg: #111827;
                 --tertiary-bg: #0b1220;
-                --card-bg: rgba(15, 23, 42, 0.95);
-                --card-bg-alt: rgba(17, 24, 39, 0.95);
+                --card-bg: rgba(15, 23, 42, 0.97);
+                --card-bg-alt: rgba(17, 24, 39, 0.97);
                 --text-primary: #e5e7eb;
                 --text-secondary: #cbd5e1;
                 --text-muted: #94a3b8;
@@ -1018,20 +1020,41 @@ hr {
                 --shadow-heavy: rgba(0, 0, 0, 0.45);
                 --input-bg: rgba(15, 23, 42, 0.9);
                 --input-border: rgba(94, 114, 228, 0.45);
-                --sidebar-bg: rgba(15, 23, 42, 0.95);
+                --sidebar-bg: rgba(15, 23, 42, 0.97);
+            }
+            /* force base containers to use variables */
+            html[data-theme='manual-dark'] body,
+            html[data-theme='manual-dark'] .stApp {
+                background: var(--primary-bg) !important;
+                color: var(--text-primary) !important;
+            }
+            html[data-theme='manual-dark'] .stSidebar,
+            html[data-theme='manual-dark'] [data-testid="stSidebar"] {
+                background: var(--sidebar-bg) !important;
+                color: var(--text-primary) !important;
+            }
+            html[data-theme='manual-dark'] .stMarkdown, 
+            html[data-theme='manual-dark'] p, 
+            html[data-theme='manual-dark'] h1, 
+            html[data-theme='manual-dark'] h2, 
+            html[data-theme='manual-dark'] h3, 
+            html[data-theme='manual-dark'] h4 {
+                color: var(--text-primary) !important;
             }
             </style>
             """, unsafe_allow_html=True)
         else:
             st.markdown("""
+            <script>
+            document.documentElement.setAttribute('data-theme','manual-light');
+            </script>
             <style>
-            /* Manual LIGHT overrides (keeps your existing design intact) */
-            :root {
+            html[data-theme='manual-light'] {
                 --primary-bg: #ffffff;
                 --secondary-bg: #f8f9fa;
                 --tertiary-bg: #e9ecef;
-                --card-bg: rgba(255, 255, 255, 0.96);
-                --card-bg-alt: rgba(248, 249, 250, 0.96);
+                --card-bg: rgba(255, 255, 255, 0.98);
+                --card-bg-alt: rgba(248, 249, 250, 0.98);
                 --text-primary: #1f2937;
                 --text-secondary: #4b5563;
                 --text-muted: #6b7280;
@@ -1042,7 +1065,25 @@ hr {
                 --shadow-heavy: rgba(0, 0, 0, 0.16);
                 --input-bg: rgba(255, 255, 255, 0.94);
                 --input-border: rgba(94, 114, 228, 0.30);
-                --sidebar-bg: rgba(248, 249, 250, 0.95);
+                --sidebar-bg: rgba(248, 249, 250, 0.98);
+            }
+            html[data-theme='manual-light'] body,
+            html[data-theme='manual-light'] .stApp {
+                background: var(--primary-bg) !important;
+                color: var(--text-primary) !important;
+            }
+            html[data-theme='manual-light'] .stSidebar,
+            html[data-theme='manual-light'] [data-testid="stSidebar"] {
+                background: var(--sidebar-bg) !important;
+                color: var(--text-primary) !important;
+            }
+            html[data-theme='manual-light'] .stMarkdown, 
+            html[data-theme='manual-light'] p, 
+            html[data-theme='manual-light'] h1, 
+            html[data-theme='manual-light'] h2, 
+            html[data-theme='manual-light'] h3, 
+            html[data-theme='manual-light'] h4 {
+                color: var(--text-primary) !important;
             }
             </style>
             """, unsafe_allow_html=True)
